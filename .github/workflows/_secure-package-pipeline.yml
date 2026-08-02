@@ -1,0 +1,260 @@
+name: Secure package pipeline
+
+on:
+  workflow_call:
+    inputs:
+      build_env:
+        required: true
+        type: string
+      branch_type:
+        required: true
+        type: string
+      package_name:
+        required: true
+        type: string
+      source_url:
+        required: true
+        type: string
+      source_branch:
+        required: false
+        type: string
+        default: ""
+      new_branch:
+        required: false
+        type: string
+        default: ""
+      manjaro_branch:
+        required: false
+        type: string
+        default: stable
+      pacman_mirror:
+        required: false
+        type: string
+        default: ""
+      pkgbuild_path:
+        required: false
+        type: string
+        default: ""
+      builder_image:
+        required: false
+        type: string
+        default: talesam/community-build:latest
+      publish_github:
+        required: false
+        type: string
+        default: "true"
+      push_to_repo:
+        required: false
+        type: string
+        default: "true"
+      update_db:
+        required: false
+        type: string
+        default: "true"
+      release_repository:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build without secrets
+    runs-on: ubuntu-latest
+    outputs:
+      started_at: ${{ steps.timing.outputs.started_at }}
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    container:
+      image: ${{ inputs.builder_image }}
+    steps:
+      - name: Record build start
+        id: timing
+        shell: bash
+        run: |
+          started_at=$(date -u +%s)
+          echo "BUILD_JOB_START=$started_at" >> "$GITHUB_ENV"
+          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted pipeline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build unsigned package
+        uses: ./
+        with:
+          build_env: ${{ inputs.build_env }}
+          branch_type: ${{ inputs.branch_type }}
+          package_name: ${{ inputs.package_name }}
+          url: ${{ inputs.source_url }}
+          git_branch: ${{ inputs.source_branch }}
+          new_branch: ${{ inputs.new_branch }}
+          manjaro_branch: ${{ inputs.manjaro_branch }}
+          pacman_mirror: ${{ inputs.pacman_mirror }}
+          pkgbuild_path: ${{ inputs.pkgbuild_path }}
+
+      - name: Upload unsigned package artifact
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+          include-hidden-files: true
+
+      - name: Report build timing
+        if: always()
+        shell: bash
+        env:
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs['artifact-digest'] }}
+        run: |
+          end=$(date -u +%s)
+          duration=$((end - BUILD_JOB_START))
+          {
+            echo '## Build job'
+            echo
+            echo "- Duration inside runner: ${duration}s"
+            echo "- Artifact digest: ${ARTIFACT_DIGEST:-unavailable}"
+            echo '- User-managed repository/environment secrets passed to build commands: none'
+            echo '- GITHUB_TOKEN: contents read; checkout credentials are not persisted'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Sign and publish in a fresh runner
+    needs: build
+    if: ${{ inputs.push_to_repo == 'true' || (inputs.publish_github == 'true' && inputs.branch_type != 'testing' && inputs.branch_type != 'aur') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: package-production
+    concurrency:
+      group: package-repository-${{ inputs.branch_type }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Record publication start
+        shell: bash
+        run: echo "PUBLISH_JOB_START=$(date -u +%s)" >> "$GITHUB_ENV"
+
+      - name: Checkout trusted publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Download and verify build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifact
+          digest-mismatch: error
+
+      - name: Verify publication tools
+        shell: bash
+        run: |
+          for command in gpg gpgconf gh rsync sha256sum ssh tar zstd; do
+            command -v "$command" >/dev/null || {
+              echo "Required command not found: $command" >&2
+              exit 1
+            }
+          done
+
+      - name: Sign and publish
+        shell: bash
+        env:
+          ARTIFACT_DIR: ${{ github.workspace }}/artifact
+          PACKAGE_NAME: ${{ inputs.package_name }}
+          BRANCH_TYPE: ${{ inputs.branch_type }}
+          SOURCE_URL: ${{ inputs.source_url }}
+          RELEASE_REPOSITORY: ${{ inputs.release_repository }}
+          PUBLISH_GITHUB: ${{ inputs.publish_github }}
+          PUSH_TO_REPO: ${{ inputs.push_to_repo }}
+          UPDATE_DB: ${{ inputs.update_db }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.PASSPHRASE }}
+          SSH_PRIVATE_KEY: ${{ secrets.PKGBUILD_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PKGBUILD_KNOWN_HOSTS }}
+          REPO_HOST: ${{ secrets.PKGBUILD_HOST }}
+          REPO_USER: ${{ secrets.PKGBUILD_USER }}
+          REPO_PORT: ${{ secrets.PKGBUILD_PORT }}
+          REPO_DIR: ${{ secrets.PKGBUILD_DIR }}
+          GH_TOKEN: ${{ secrets.REPOSITORY_TOKEN || github.token }}
+        run: ./scripts/publish-package.sh
+
+      - name: Report publication timing
+        if: always()
+        shell: bash
+        run: |
+          end=$(date -u +%s)
+          duration=$((end - PUBLISH_JOB_START))
+          {
+            echo '## Publication job'
+            echo
+            echo "- Duration inside runner: ${duration}s"
+            echo '- Build container and publication runner shared no filesystem or process state.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    name: Send final notification
+    needs: [build, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    environment: package-notifications
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout notification script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Determine final status
+        id: status
+        shell: bash
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          if [[ $BUILD_RESULT != success ]]; then
+            status=build-failure
+          elif [[ $PUBLISH_RESULT == skipped ]]; then
+            status=build-success
+          elif [[ $PUBLISH_RESULT != success ]]; then
+            status=publish-failure
+          else
+            status=success
+          fi
+          echo "value=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TOKEN_BOT }}
+          TELEGRAM_CHAT_ID: ${{ secrets.CHAT_ID }}
+          FINAL_STATUS: ${{ steps.status.outputs.value }}
+          PACKAGE_NAME: ${{ inputs.package_name }}
+          BRANCH_TYPE: ${{ inputs.branch_type }}
+        run: ./scripts/notify.sh "$FINAL_STATUS" "$PACKAGE_NAME" "$BRANCH_TYPE"
+
+      - name: Report total elapsed time
+        if: always()
+        env:
+          WORKFLOW_STARTED_AT: ${{ needs.build.outputs.started_at }}
+        run: |
+          if [[ $WORKFLOW_STARTED_AT =~ ^[0-9]+$ ]]; then
+            elapsed=$(($(date -u +%s) - WORKFLOW_STARTED_AT))
+            {
+              echo '## Complete secure pipeline'
+              echo
+              echo "- Elapsed time since build runner start: ${elapsed}s"
+              echo '- Includes artifact transfer and publication runner startup.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

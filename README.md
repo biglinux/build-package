@@ -1,193 +1,435 @@
 # Community Package Build Action
 
-This repository contains GitHub Actions workflows and a custom action for building and managing packages for the Community repository. The system is designed to handle both AUR (Arch User Repository) packages and custom community packages.
+This repository contains GitHub Actions workflows and a custom action for building, signing, and publishing Arch Linux and Manjaro packages for the BigLinux Community repository.
+
+It supports packages maintained by BigLinux as well as packages obtained from the Arch User Repository (AUR). Both use the same pipeline so the build process remains consistent and easier to maintain.
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Workflows](#workflows)
-   - [AUR Package Build](#aur-package-build)
+2. [Package Pipeline](#package-pipeline)
+3. [Workflows](#workflows)
    - [Build Package](#build-package)
-3. [Custom Action](#custom-action)
-4. [Usage](#usage)
-5. [Input Parameters](#input-parameters)
-6. [Environment Variables](#environment-variables)
-7. [Secrets](#secrets)
-8. [Build Process Steps](#build-process-steps)
-9. [Customization](#customization)
-10. [Contributing](#contributing)
+   - [AUR Package Build](#aur-package-build)
+   - [Reusable Package Pipeline](#reusable-package-pipeline)
+   - [Validation](#validation)
+4. [Custom Action and Scripts](#custom-action-and-scripts)
+5. [Usage](#usage)
+6. [Input Parameters](#input-parameters)
+7. [Build Environments](#build-environments)
+8. [Date-Based Package Versions](#date-based-package-versions)
+9. [GitHub Environments and Secrets](#github-environments-and-secrets)
+10. [Build Process](#build-process)
+11. [Package Validation](#package-validation)
+12. [Customization](#customization)
+13. [Contributing](#contributing)
 
 ## Overview
 
-This project automates the process of building, signing, and publishing packages for the Community repository. It supports both AUR packages and custom community packages, with different workflows for each type. The action provides visual feedback with a custom blue-based color scheme and integrates with Telegram for status notifications.
+The package pipeline performs the following operations:
+
+- prepares the selected Manjaro and BigLinux repositories;
+- fully updates the rolling-release build environment;
+- obtains the PKGBUILD from a BigLinux, community, or AUR Git repository;
+- builds packages with `makepkg` as an unprivileged user;
+- runs Namcap checks;
+- transfers unsigned packages to a separate publication job;
+- validates and signs packages with GPG;
+- uploads packages to the selected BigLinux repository;
+- updates the repository database;
+- optionally creates a GitHub release;
+- sends the final result to Telegram.
+
+The build and publication stages run in separate GitHub Actions jobs. Publication credentials are therefore not available to the PKGBUILD or to code executed during compilation.
+
+## Package Pipeline
+
+```text
+Build job
+  configure repositories
+  pacman -Syyu
+  clone package source
+  makepkg as builduser
+  Namcap checks
+  upload unsigned artifact
+            ↓
+Publish job on a fresh runner
+  download and validate artifact
+  sign packages with GPG
+  upload through SSH
+  update repository database
+  optionally create a GitHub release
+            ↓
+Notification job
+  report the final result to Telegram
+```
+
+The same pipeline is used for BigLinux and AUR packages. This keeps maintenance and behavior consistent across all package types.
 
 ## Workflows
 
-### AUR Package Build
-
-**File:** `aur-package-build.yml`
-
-This workflow is triggered by repository dispatch events with types starting with 'aur-*' or manually through the workflow dispatch. It's designed to build packages from the Arch User Repository (AUR).
-
-Key features:
-- Supports manual and automated triggering
-- Uses a custom Docker container (talesam/community-build:1.6.5) for the build environment
-- Handles AUR package building, signing, and publishing
-- Supports debug sessions with tmate
-- Integrates with Telegram for notifications
-- Captures and reports build duration
-
 ### Build Package
 
-**File:** `build-package.yml`
+**File:** `.github/workflows/build-package.yml`
 
-This workflow is for building custom community packages. It can be triggered by repository dispatch events (except those starting with 'aur-*') or manually through the workflow dispatch.
+Builds packages from Git repositories containing a PKGBUILD.
 
-Key features:
-- Supports multiple branch types (testing, extra, stable)
-- Allows creation of new branches
-- Uses a custom Docker container for the build environment
-- Handles package building, signing, and publishing
-- Supports debug sessions with tmate
-- Integrates with Telegram for notifications
-- Captures start and end times to calculate build duration
+It can be started manually with `workflow_dispatch` or remotely with `repository_dispatch`, except for event types beginning with `aur-`.
 
-## Custom Action
+Main features:
+
+- supports `stable`, `testing`, and `extra` destinations;
+- supports selecting the Manjaro branch used during the rolling update;
+- supports a specific source branch;
+- supports repositories containing more than one PKGBUILD;
+- optionally publishes a GitHub release;
+- uploads and updates the BigLinux package repository.
+
+### AUR Package Build
+
+**File:** `.github/workflows/aur-package-build.yml`
+
+Builds packages from the Arch User Repository.
+
+It can be started manually or through a `repository_dispatch` event whose type begins with `aur-`.
+
+Main features:
+
+- validates that the requested package name matches the AUR repository name;
+- builds against the current rolling-release repositories;
+- installs declared AUR dependencies when required;
+- publishes the resulting package to `community-extra`;
+- uses the same isolated build and publication model as BigLinux packages.
+
+### Reusable Package Pipeline
+
+**File:** `.github/workflows/_secure-package-pipeline.yml`
+
+Contains the shared implementation used by both entry workflows.
+
+It defines three jobs:
+
+- `build`: updates the container and builds unsigned packages without publication secrets;
+- `publish`: runs on a fresh runner, validates, signs, and publishes the packages;
+- `notify`: sends the final status to Telegram.
+
+### Validation
+
+**File:** `.github/workflows/lint.yml`
+
+Checks workflow and script changes with:
+
+- `actionlint`;
+- ShellCheck;
+- `bash -n`.
+
+This workflow is separate from package compilation and does not increase normal package build time.
+
+## Custom Action and Scripts
+
+### Custom Action
 
 **File:** `action.yml`
 
-This is the core action used by both workflows. It defines the steps for building, signing, and publishing packages.
+The custom composite action is responsible only for the build stage. It accepts package source and branch settings, then calls `scripts/build-package.sh`.
 
-Key features:
-- Elegant color-coded terminal output
-- Configurable build environment
-- Support for custom package repositories
-- GPG signing of packages
-- Publishing to GitHub releases
-- Pushing to custom package repositories
-- Updating repository databases
-- Cleaning old packages
-- Visual progress tracking with step numbering (steps 1/4 through 4/4)
+It does not receive GPG, SSH, Telegram, or repository publication credentials.
+
+### Scripts
+
+The shell logic is kept in regular script files instead of being embedded in large YAML blocks:
+
+| File | Responsibility |
+|---|---|
+| `scripts/build-package.sh` | Configure repositories, update the system, clone the source, run `makepkg`, execute Namcap, and prepare the artifact. |
+| `scripts/publish-package.sh` | Validate package metadata, sign packages, upload through SSH, update the repository database, and optionally create a GitHub release. |
+| `scripts/notify.sh` | Send the final workflow result to Telegram. |
+
+Keeping this logic in scripts makes it easier to read, test with ShellCheck, and reuse without turning the workflow YAML into a large shell program.
 
 ## Usage
 
-To use these workflows and the custom action in your repository:
+### Repository setup
 
-1. Copy the workflow files (`aur-package-build.yml` and `build-package.yml`) to your `.github/workflows/` directory.
-2. Copy the `action.yml` file to the root of your repository.
-3. Set up the required secrets in your GitHub repository settings.
-4. Trigger the workflows manually or set up repository dispatch events to automate the process.
+Keep the following files and directories together:
+
+```text
+.github/workflows/
+  _secure-package-pipeline.yml
+  aur-package-build.yml
+  build-package.yml
+  lint.yml
+action.yml
+scripts/
+  build-package.sh
+  notify.sh
+  publish-package.sh
+```
+
+The scripts are part of the action and must remain executable.
+
+### Manual build
+
+1. Open the repository on GitHub.
+2. Select **Actions**.
+3. Select **Build Package** or **AUR Package Build**.
+4. Select **Run workflow**.
+5. Fill in the package source and destination fields.
+
+### Repository dispatch
+
+BigLinux packages can be triggered with a payload similar to:
+
+```json
+{
+  "event_type": "build-package",
+  "client_payload": {
+    "package_name": "example-package",
+    "url": "https://github.com/biglinux/example-package.git",
+    "branch_type": "testing",
+    "manjaro_branch": "stable"
+  }
+}
+```
+
+AUR packages require an event type beginning with `aur-`:
+
+```json
+{
+  "event_type": "aur-example-package",
+  "client_payload": {
+    "package_name": "example-package",
+    "aur_url": "https://aur.archlinux.org/example-package.git"
+  }
+}
+```
 
 ## Input Parameters
 
-The custom action supports the following input parameters:
+### Build Package workflow
 
-- `build_env`: Build environment (testing, extra, stable, or aur)
-- `source`: Custom package repo source
-- `manjaro_branch`: Manjaro branch to build
-- `custom_repo`: Custom repo
-- `multilib`: Build multilib package
-- `repo`: Package repo
-- `gpg_key`: GPG signing key
-- `gpg_passphrase`: GPG passphrase
-- `git_branch`: Extra repository to build package
-- `extra_command`: Extra command to run before building
-- `extra_package`: Extra package to build
-- `tmate`: Run tmate for debugging
-- `repo_mirror`: Mirror to use in build
-- `repo_dev`: Development repository
-- `pacman_mirror`: Specific mirror to override automatic selection
-- `publish_github`: Publish package on GitHub
-- `push_to_repo`: Push package to repository
-- `update_db`: Update repository database
-- `repo_host`: Repository host
-- `repo_user`: Repository user
-- `repo_port`: Repository port
-- `repo_dir`: Repository directory
-- `github_token`: GitHub token for authentication
-- `telegram_token`: Telegram bot token for notifications
-- `telegram_chat_id`: Telegram chat ID for notifications
-- `branch_type`: Branch type (testing, extra or stable)
-- `url`: Repository URL
-- `new_branch`: Name of the new branch
-- `package_name`: Package name
-- `aur_package_dir`: Directory containing the AUR package
-- `start_time`: Workflow start time
-- `start_timestamp`: Workflow start timestamp as epoch seconds
-- `repo_origem`: Source repository
-- `branch_fullname`: Full name of the source branch
+| Input | Required | Description |
+|---|---:|---|
+| `package_name` | Yes | Package or pkgbase name. |
+| `source_url` | Yes | HTTPS Git repository containing the PKGBUILD. |
+| `branch_type` | Yes | Destination: `testing`, `extra`, or `stable`. |
+| `source_branch` | No | Git branch to clone from the source repository. |
+| `new_branch` | No | Branch applied to existing BigLinux Git sources in testing builds. |
+| `pkgbuild_path` | No | Directory containing the PKGBUILD when the repository has more than one. |
+| `manjaro_branch` | Yes | Manjaro repository branch: `stable`, `testing`, or `unstable`. |
+| `pacman_mirror` | No | Complete Manjaro mirror URL overriding the automatic mirror. |
+| `release_repository` | No | GitHub `owner/repository` used for releases. |
+| `publish_github` | Yes | Create or update a GitHub release. |
+| `push_to_repo` | Yes | Upload packages to the BigLinux package server. |
+| `update_db` | Yes | Update the destination repository database. |
 
-## Environment Variables
+GitHub releases are not created for `testing` or AUR builds.
 
-The workflows use the following environment variables:
+### AUR Package Build workflow
 
-- `PACKAGE_NAME`: Name of the package to build
-- `AUR_URL`: URL of the AUR package
-- `BRANCH_TYPE`: Type of branch (aur, testing, extra, stable)
-- `BUILD_ENV`: Build environment
-- `NEW_BRANCH`: Name of the new branch to create or use
-- `TELEGRAM_TOKEN`: Telegram bot token for notifications
-- `CHAT_ID`: Telegram chat ID for notifications
-- `BRANCH_ORIGEM`: Origin branch name
-- `REPO_ORIGEM`: Origin repository URL
-- `REPO_NAME`: Repository name
-- `BRANCH_FULLNAME`: Full name of the branch of origin
+| Input | Required | Description |
+|---|---:|---|
+| `package_name` | Yes | AUR package name. |
+| `aur_url` | Yes | AUR Git repository URL. |
+| `pacman_mirror` | No | Complete Manjaro mirror URL overriding the automatic mirror. |
+| `push_to_repo` | Yes | Upload packages to the BigLinux package server. |
+| `update_db` | Yes | Update the `community-extra` repository database. |
 
-## Secrets
+### Composite action
 
-The following secrets are required:
+The `action.yml` file accepts:
 
-- `PKGBUILD_KEY`: SSH key for accessing the package build server
-- `GITHUB_TOKEN`: GitHub authentication token
-- `GPG_PRIVATE_KEY`: GPG private key for signing packages
-- `PASSPHRASE`: Passphrase for the GPG key
-- `TOKEN_BOT`: Telegram bot token
-- `CHAT_ID`: Telegram chat ID for notifications
-- `PKGBUILD_HOST`: Hostname of the package build server
-- `PKGBUILD_USER`: Username for the package build server
-- `PKGBUILD_PORT`: SSH port for the package build server
-- `PKGBUILD_DIR`: Directory on the build server for storing packages
-- `REPOSITORY_TOKEN`: Token for repository operations (optional)
-- `ORGANIZATION_TOKEN`: Token for organization operations (optional)
+| Input | Description |
+|---|---|
+| `build_env` | Build environment: `stable`, `testing`, `extra`, or `aur`. |
+| `branch_type` | Destination branch. |
+| `package_name` | Requested package or pkgbase. |
+| `url` | Git repository containing the PKGBUILD. |
+| `git_branch` | Optional source branch. |
+| `new_branch` | Optional BigLinux testing branch. |
+| `manjaro_branch` | Manjaro branch used by Pacman. |
+| `pacman_mirror` | Optional complete mirror URL. |
+| `pkgbuild_path` | Optional PKGBUILD directory relative to the source repository. |
 
-## Build Process Steps
+## Build Environments
 
-The build process is divided into 4 main steps:
+The selected repositories are configured before the full update. The build then runs:
 
-### Step 1: Package Initialization
-- Set up the build environment
-- Clone source repository
-- Configure system and repositories
-- Import GPG key
+```bash
+pacman -Syyu --needed --noconfirm
+```
 
-### Step 2: Package Building and Upload
-- Build the package using makepkg
-- Sign the package with GPG
-- Generate checksums
-- Push the package to the repository
+Default repository priority:
 
-### Step 3: Repository Management
-- Clean old package versions
-- Update repository database
-- Prepare package for release (7z compression if needed)
+| Destination | Repository priority |
+|---|---|
+| `stable` | `community-stable`, `biglinux-stable` |
+| `testing` | `community-testing`, `community-stable`, `biglinux-testing`, `biglinux-stable` |
+| `extra` / `aur` | `community-extra`, `community-testing`, `community-stable`, `biglinux-testing`, `biglinux-stable` |
 
-### Step 4: Finalization
-- Create GitHub release (if enabled)
-- Calculate and report build duration
-- Send completion notification
+This ensures that packages are compiled with the current libraries used by the selected rolling-release environment.
 
-The process includes elegant terminal output with color-coded messages and detailed progress tracking through Telegram notifications.
+The optional repository variable `BIGLINUX_BUILDER_IMAGE` changes the container image used by the build job. Its default value is:
+
+```text
+talesam/community-build:latest
+```
+
+## Date-Based Package Versions
+
+Each build exports the following variables to `makepkg`:
+
+```text
+BIGLINUX_BUILD_VERSION=YYYYMMDD.HHMM
+SOURCE_DATE_EPOCH=<UTC build start timestamp>
+BIGLINUX_GIT_BRANCH=<selected source branch>
+```
+
+A PKGBUILD can use the standard BigLinux date-based version with:
+
+```bash
+pkgver() {
+    printf '%s\n' "$BIGLINUX_BUILD_VERSION"
+}
+```
+
+For VCS packages that should also identify the source commit:
+
+```bash
+pkgver() {
+    cd "$srcdir/$pkgname"
+    printf '%s.r%s.g%s\n' \
+        "$BIGLINUX_BUILD_VERSION" \
+        "$(git rev-list --count HEAD)" \
+        "$(git rev-parse --short=12 HEAD)"
+}
+```
+
+The timestamp is consistent throughout one build. The pipeline does not retain historical repository snapshots and does not claim byte-for-byte reproducible builds.
+
+## GitHub Environments and Secrets
+
+### `package-production`
+
+Create a GitHub environment named `package-production` with the publication credentials:
+
+| Secret | Purpose |
+|---|---|
+| `GPG_PRIVATE_KEY` | ASCII-armored private key used to sign packages. |
+| `PASSPHRASE` | Passphrase for the GPG key. |
+| `PKGBUILD_KEY` | SSH private key used to access the package server. |
+| `PKGBUILD_KNOWN_HOSTS` | Trusted SSH host key entries. |
+| `PKGBUILD_HOST` | Package server hostname. |
+| `PKGBUILD_USER` | Package server SSH user. |
+| `PKGBUILD_PORT` | Package server SSH port. |
+| `PKGBUILD_DIR` | Absolute package repository path on the server. |
+| `REPOSITORY_TOKEN` | Optional token for publishing releases in another repository. |
+
+The publication environment should be restricted to the protected default branch. Required reviewers can be enabled when manual approval is desired before signing and publishing packages.
+
+### `package-notifications`
+
+Create a GitHub environment named `package-notifications` with:
+
+| Secret | Purpose |
+|---|---|
+| `TOKEN_BOT` | Telegram bot token. |
+| `CHAT_ID` | Telegram chat ID. |
+
+Notification credentials are kept separate from package signing and repository credentials.
+
+### SSH host verification
+
+Generate and verify the known-hosts entry from a trusted machine:
+
+```bash
+ssh-keyscan -p PORT -t ed25519 HOST > known_hosts
+ssh-keygen -lf known_hosts
+```
+
+Store the complete verified contents in `PKGBUILD_KNOWN_HOSTS`.
+
+## Build Process
+
+### 1. Build environment preparation
+
+- validates workflow inputs;
+- configures the selected Manjaro and BigLinux repositories;
+- fully updates the rolling-release environment;
+- installs required packaging tools;
+- creates an unprivileged `builduser`.
+
+### 2. Source preparation
+
+- validates the Git or AUR URL;
+- clones the requested branch;
+- locates the PKGBUILD;
+- rejects symbolic-link PKGBUILDs and paths outside the source repository;
+- generates package metadata.
+
+### 3. Package compilation
+
+- installs declared dependencies;
+- runs `makepkg --cleanbuild --clean --syncdeps --noconfirm --nosign`;
+- verifies the package files declared by `makepkg --packagelist`;
+- executes Namcap checks;
+- stores the unsigned packages and build metadata as a GitHub artifact.
+
+### 4. Signing and publication
+
+A new runner:
+
+- downloads and verifies the artifact;
+- validates package names, metadata, architecture, and archive paths;
+- imports the GPG key into a temporary keyring;
+- signs each package and verifies the signatures;
+- generates SHA-256 files;
+- uploads files to a temporary directory on the package server;
+- updates the repository under a branch-specific lock;
+- optionally creates or updates a GitHub release.
+
+### 5. Notification
+
+The final job reports build or publication success and failure through Telegram and records execution times in the GitHub Actions summary.
+
+## Package Validation
+
+The pipeline verifies, among other checks:
+
+- the requested package name and source URL;
+- the PKGBUILD location;
+- package output names declared by `makepkg`;
+- presence of `.PKGINFO`, `.BUILDINFO`, and `.MTREE`;
+- consistency between package filename and package metadata;
+- consistent versions among split packages;
+- safe archive paths without absolute paths or `..` traversal;
+- SHA-256 digest during artifact transfer;
+- GPG signatures after creation.
+
+Namcap findings are currently reported as warnings so existing packages can be improved gradually without blocking every build.
+
+For static source archives, PKGBUILDs should use real SHA-256 checksums. Git sources may use `SKIP`, but should be pinned to a commit or a controlled tag whenever practical.
 
 ## Customization
 
-You can customize the build process by:
+The pipeline can be customized by:
 
-- Modifying the `action.yml` file to add or remove steps
-- Adjusting the input parameters in the workflow files
-- Changing the Docker image used for the build environment
-- Adding custom commands in the `extra_command` input
-- Customizing the color palette for terminal output
+- changing repository priority in `scripts/build-package.sh`;
+- setting `BIGLINUX_BUILDER_IMAGE` in GitHub repository variables;
+- changing build or publication inputs in the entry workflows;
+- extending validation in `scripts/publish-package.sh`;
+- adjusting Telegram messages in `scripts/notify.sh`.
+
+Avoid placing arbitrary commands, interactive tmate sessions, or source-changing automation in the production pipeline. Those operations should use separate workflows without package publication credentials.
 
 ## Contributing
 
-Contributions to improve the workflows or the custom action are welcome. Please submit pull requests or open issues to discuss potential changes or improvements.
+Contributions are welcome. Before submitting changes:
+
+```bash
+bash -n scripts/*.sh
+shellcheck scripts/*.sh
+actionlint
+```
+
+Changes to workflows, `action.yml`, and scripts should be reviewed carefully because they affect package creation, signing, and publication.

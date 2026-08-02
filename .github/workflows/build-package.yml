@@ -2,187 +2,84 @@ name: 📦 Build Package
 
 on:
   repository_dispatch:
-    types:
-      - "*"
-      - "!aur-*"
   workflow_dispatch:
     inputs:
+      package_name:
+        description: Package name
+        required: true
+        type: string
+      source_url:
+        description: HTTPS GitHub repository containing the PKGBUILD
+        required: true
+        type: string
       branch_type:
-        description: "Branch type (testing, extra or stable)"
+        description: Destination repository branch
         required: true
         type: choice
-        options:
-          - testing
-          - extra
-          - stable
+        options: [testing, extra, stable]
+      source_branch:
+        description: Source Git branch (optional)
+        required: false
+        type: string
       new_branch:
-        description: "New branch name"
+        description: BigLinux testing source branch (optional)
+        required: false
+        type: string
+      pkgbuild_path:
+        description: Directory containing PKGBUILD when the repository has more than one
+        required: false
+        type: string
+      manjaro_branch:
+        description: Manjaro branch used for the rolling update
         required: true
-        type: string
-      debug_enabled:
-        type: boolean
-        description: "With TMATE"
+        default: stable
+        type: choice
+        options: [stable, testing, unstable]
+      pacman_mirror:
+        description: Optional complete Manjaro mirror URL
         required: false
-        default: true
+        type: string
+      release_repository:
+        description: Optional owner/repository for the GitHub release
+        required: false
+        type: string
       publish_github:
-        description: "Publish package on GitHub"
-        type: boolean
-        required: false
-        default: true
+        description: Publish a GitHub release
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
       push_to_repo:
-        description: "Push package to repository"
-        type: boolean
-        required: false
-        default: true
+        description: Upload to the BigLinux package repository
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
       update_db:
-        description: "Update repository database"
-        type: boolean
-        required: false
-        default: true
-      extra_command:
-        description: "Extra command to run before building"
-        required: false
-        type: string
-
-env:
-  BRANCH_TYPE: "${{ github.event.client_payload.branch_type || github.event.inputs.branch_type }}"
-  NEW_BRANCH: "${{ github.event.client_payload.branch || github.event.inputs.new_branch }}"
-  PACKAGE_NAME: "${{ github.event.action }}"
-  TELEGRAM_TOKEN: "${{ secrets.TOKEN_BOT }}"
-  CHAT_ID: "${{ secrets.CHAT_ID }}"
-  BRANCH_ORIGEM: "${{ github.ref_name }}"
-  REPO_ORIGEM: "${{ github.event.client_payload.url }}"
-  REPO_NAME: "${{ github.repository }}"
-  BRANCH_FULLNAME: "${{ github.event.client_payload.branch }}"
-  REPOSITORY_TOKEN: "${{ secrets.REPOSITORY_TOKEN }}"
-  ORGANIZATION_TOKEN: "${{ secrets.ORGANIZATION_TOKEN }}"
+        description: Update repository database
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  package:
     permissions:
       contents: write
-      packages: write
-      actions: write
-      deployments: write
-      issues: write
-      pull-requests: write
-    container:
-      image: talesam/community-build:latest
-      options: --privileged
-    steps:
-      - name: Capture workflow start time
-        id: start-time
-        run: |
-          START_TIME=$(date +"%Y-%m-%d %H:%M:%S")
-          START_TIMESTAMP=$(date +%s)
-          echo "Workflow started at: $START_TIME"
-          echo "START_TIME=$START_TIME" >> $GITHUB_ENV
-          echo "START_TIMESTAMP=$START_TIMESTAMP" >> $GITHUB_ENV
-
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup SSH Agent
-        env:
-          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
-        run: |
-          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
-          ssh-add - <<< "${{ secrets.PKGBUILD_KEY }}"
-          echo "SSH_AUTH_SOCK=/tmp/ssh_agent.sock" >> $GITHUB_ENV
-
-      - name: Add safe directory
-        run: git config --global --add safe.directory /__w/build-package/build-package
-
-      - name: Set ENVs
-        shell: bash
-        run: |
-          if [ -n "${{ github.event.client_payload.url }}" ]; then
-            echo "url=${{ github.event.client_payload.url }}" >> $GITHUB_ENV
-          fi
-          if [ -n "${{ github.event.client_payload.branch }}" ]; then
-            echo "git_branch=${{ github.event.client_payload.branch }}" >> $GITHUB_ENV
-          fi
-
-          if [ -z "${{ github.event.client_payload.manjaro_branch }}" ]; then
-            echo "manjaro_branch=stable" >> $GITHUB_ENV
-          else
-            echo "manjaro_branch=${{ github.event.client_payload.manjaro_branch }}" >> $GITHUB_ENV
-          fi
-
-          if [ -z "${{ github.event.client_payload.community_branch }}" ]; then
-            echo "community_branch=testing" >> $GITHUB_ENV
-          else
-            echo "community_branch=${{ github.event.client_payload.community_branch }}" >> $GITHUB_ENV
-          fi
-
-      - name: Fetch all branches
-        run: |
-          git fetch --all
-          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-
-      - name: Checkout to specified branch or create if not exists
-        run: |
-          if git ls-remote --exit-code --heads origin ${{ env.NEW_BRANCH }}; then
-            git checkout ${{ env.NEW_BRANCH }}
-          else
-            git checkout -b ${{ env.NEW_BRANCH }}
-          fi
-
-      - name: Debug Environment Variables
-        shell: bash
-        run: |
-          echo "url: $url"
-          echo "git_branch: $git_branch"
-          echo "manjaro_branch: $manjaro_branch"
-          echo "community_branch: $community_branch"
-          echo "BRANCH_TYPE: ${{ env.BRANCH_TYPE }}"
-          echo "NEW_BRANCH: ${{ env.NEW_BRANCH }}"
-          echo "PACKAGE_NAME: ${{ env.PACKAGE_NAME }}"
-
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-        with:
-          install-dependencies: false
-
-      - name: Build and Publish Package
-        uses: ./
-        with:
-          build_env: ${{ env.BRANCH_TYPE }}
-          branch_type: ${{ env.BRANCH_TYPE }}
-          new_branch: ${{ env.NEW_BRANCH }}
-          package_name: ${{ env.PACKAGE_NAME }}
-          url: ${{ env.url }}
-          git_branch: ${{ env.git_branch }}
-          manjaro_branch: ${{ env.manjaro_branch }}
-          repo: ${{ github.repository }}
-
-          tmate: ${{ github.event.inputs.tmate || false }}
-
-          github_token: ${{ secrets.REPOSITORY_TOKEN || secrets.GITHUB_TOKEN }}
-          gpg_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          gpg_passphrase: ${{ secrets.PASSPHRASE }}
-          telegram_token: ${{ secrets.TOKEN_BOT }}
-          telegram_chat_id: ${{ secrets.CHAT_ID }}
-          
-          # Add configuration for translation
-          translate: 'true'
-          openai_key: ${{ secrets.OPENAI_KEY }}
-
-          repo_host: ${{ secrets.PKGBUILD_HOST }}
-          repo_user: ${{ secrets.PKGBUILD_USER }}
-          repo_port: ${{ secrets.PKGBUILD_PORT }}
-          repo_dir: ${{ secrets.PKGBUILD_DIR }}
-
-          publish_github: ${{ github.event.inputs.publish_github || 'true' }}
-          push_to_repo: ${{ github.event.inputs.push_to_repo || 'true' }}
-          update_db: ${{ github.event.inputs.update_db || 'true' }}
-
-          extra_command: ${{ github.event.inputs.extra_command }}
-
-          start_time: "${{ env.START_TIME }}"
-          start_timestamp: "${{ env.START_TIMESTAMP }}"
-          repo_origem: "${{ github.event.client_payload.url }}"
-          branch_fullname: "${{ github.event.client_payload.branch }}"
+    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.action, 'aur-') }}
+    uses: ./.github/workflows/_secure-package-pipeline.yml
+    with:
+      build_env: ${{ github.event_name == 'workflow_dispatch' && inputs.branch_type || github.event.client_payload.branch_type || 'testing' }}
+      branch_type: ${{ github.event_name == 'workflow_dispatch' && inputs.branch_type || github.event.client_payload.branch_type || 'testing' }}
+      package_name: ${{ github.event_name == 'workflow_dispatch' && inputs.package_name || github.event.client_payload.package_name || github.event.action }}
+      source_url: ${{ github.event_name == 'workflow_dispatch' && inputs.source_url || github.event.client_payload.url }}
+      source_branch: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_branch || inputs.new_branch) || github.event.client_payload.source_branch || github.event.client_payload.branch || '' }}
+      new_branch: ${{ github.event_name == 'workflow_dispatch' && inputs.new_branch || github.event.client_payload.branch || '' }}
+      pkgbuild_path: ${{ github.event_name == 'workflow_dispatch' && inputs.pkgbuild_path || github.event.client_payload.pkgbuild_path || '' }}
+      manjaro_branch: ${{ github.event_name == 'workflow_dispatch' && inputs.manjaro_branch || github.event.client_payload.manjaro_branch || 'stable' }}
+      pacman_mirror: ${{ github.event_name == 'workflow_dispatch' && inputs.pacman_mirror || github.event.client_payload.pacman_mirror || '' }}
+      builder_image: ${{ vars.BIGLINUX_BUILDER_IMAGE || 'talesam/community-build:latest' }}
+      publish_github: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_github || 'true' }}
+      push_to_repo: ${{ github.event_name == 'workflow_dispatch' && inputs.push_to_repo || 'true' }}
+      update_db: ${{ github.event_name == 'workflow_dispatch' && inputs.update_db || 'true' }}
+      release_repository: ${{ github.event_name == 'workflow_dispatch' && inputs.release_repository || github.event.client_payload.release_repository || '' }}
