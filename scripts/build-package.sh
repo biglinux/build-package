@@ -16,6 +16,8 @@ as_builduser_in() {
     local directory=$1
     shift
 
+    # The command is intentionally single-quoted so the inner Bash expands it.
+    # shellcheck disable=SC2016
     runuser -u builduser -- env \
         HOME=/home/builduser \
         SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}" \
@@ -42,7 +44,8 @@ validate_enum() {
 strip_repo_sections() {
     local file=$1
     shift
-    local sections="|$(IFS='|'; printf '%s' "$*")|"
+    local sections
+    sections="|$(IFS='|'; printf '%s' "$*")|"
     awk -v sections="$sections" '
         /^\[[^]]+\]$/ {
             name=$0
@@ -87,21 +90,21 @@ configure_repositories() {
     # stable repositories are only fallbacks where required.
     case "$branch" in
         stable)
-            append_repo community-stable 'https://repo.communitybig.org/stable/$arch'
-            append_repo biglinux-stable 'https://repo.biglinux.com.br/stable/$arch'
+            append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
+            append_repo biglinux-stable "https://repo.biglinux.com.br/stable/\$arch"
             ;;
         testing)
-            append_repo community-testing 'https://repo.communitybig.org/testing/$arch'
-            append_repo community-stable 'https://repo.communitybig.org/stable/$arch'
-            append_repo biglinux-testing 'https://repo.biglinux.com.br/testing/$arch'
-            append_repo biglinux-stable 'https://repo.biglinux.com.br/stable/$arch'
+            append_repo community-testing "https://repo.communitybig.org/testing/\$arch"
+            append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
+            append_repo biglinux-testing "https://repo.biglinux.com.br/testing/\$arch"
+            append_repo biglinux-stable "https://repo.biglinux.com.br/stable/\$arch"
             ;;
         extra|aur)
-            append_repo community-extra 'https://repo.communitybig.org/extra/$arch'
-            append_repo community-testing 'https://repo.communitybig.org/testing/$arch'
-            append_repo community-stable 'https://repo.communitybig.org/stable/$arch'
-            append_repo biglinux-testing 'https://repo.biglinux.com.br/testing/$arch'
-            append_repo biglinux-stable 'https://repo.biglinux.com.br/stable/$arch'
+            append_repo community-extra "https://repo.communitybig.org/extra/\$arch"
+            append_repo community-testing "https://repo.communitybig.org/testing/\$arch"
+            append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
+            append_repo biglinux-testing "https://repo.biglinux.com.br/testing/\$arch"
+            append_repo biglinux-stable "https://repo.biglinux.com.br/stable/\$arch"
             ;;
     esac
 
