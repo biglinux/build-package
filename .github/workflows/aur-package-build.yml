@@ -43,6 +43,6 @@ jobs:
       manjaro_branch: stable
       pacman_mirror: ${{ github.event_name == 'workflow_dispatch' && inputs.pacman_mirror || github.event.client_payload.pacman_mirror || '' }}
       builder_image: ${{ vars.BIGLINUX_BUILDER_IMAGE || 'talesam/community-build:latest' }}
-      publish_github: "false"
+      publish_github: ${{ 'false' }}
       push_to_repo: ${{ github.event_name == 'workflow_dispatch' && inputs.push_to_repo || 'true' }}
       update_db: ${{ github.event_name == 'workflow_dispatch' && inputs.update_db || 'true' }}
