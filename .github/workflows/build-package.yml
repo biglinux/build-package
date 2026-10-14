@@ -16,7 +16,7 @@ on:
         description: Destination repository branch
         required: true
         type: choice
-        options: [testing, extra, stable]
+        options: [testing, stable]
       source_branch:
         description: Source Git branch (optional)
         required: false
@@ -75,7 +75,8 @@ jobs:
       source_url: ${{ github.event_name == 'workflow_dispatch' && inputs.source_url || github.event.client_payload.url }}
       source_branch: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_branch || inputs.new_branch) || github.event.client_payload.source_branch || github.event.client_payload.branch || '' }}
       new_branch: ${{ github.event_name == 'workflow_dispatch' && inputs.new_branch || github.event.client_payload.branch || '' }}
-      pkgbuild_path: ${{ github.event_name == 'workflow_dispatch' && inputs.pkgbuild_path || github.event.client_payload.pkgbuild_path || '' }}
+      # gitrepo sends pkgbuild_dir (multi-package repositories)
+      pkgbuild_path: ${{ github.event_name == 'workflow_dispatch' && inputs.pkgbuild_path || github.event.client_payload.pkgbuild_path || github.event.client_payload.pkgbuild_dir || '' }}
       manjaro_branch: ${{ github.event_name == 'workflow_dispatch' && inputs.manjaro_branch || github.event.client_payload.manjaro_branch || 'stable' }}
       pacman_mirror: ${{ github.event_name == 'workflow_dispatch' && inputs.pacman_mirror || github.event.client_payload.pacman_mirror || '' }}
       builder_image: ${{ vars.BIGLINUX_BUILDER_IMAGE || 'talesam/community-build:latest' }}

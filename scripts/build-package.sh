@@ -346,6 +346,8 @@ main() {
     : "${SOURCE_BRANCH:=}"
     : "${NEW_BRANCH:=}"
     : "${PKGBUILD_PATH:=}"
+    : "${AUR_COMMIT:=}"
+    : "${AUR_PKGREL:=}"
     : "${DIST_DIR:=$GITHUB_WORKSPACE/dist}"
 
     require_value PACKAGE_NAME "${PACKAGE_NAME:-}"
@@ -379,10 +381,31 @@ main() {
         bash -c "$(declare -f die log clone_source); clone_source '$source_dir'")
     source_commit=${source_commit##*$'\n'}
 
+    # AUR only: Repo Management reviews what changed in the AUR before asking
+    # for a build and sends the commit it reviewed -- build that one, not
+    # whatever was pushed in the meantime.
+    if [[ $BUILD_ENV == aur && -n $AUR_COMMIT ]]; then
+        [[ $AUR_COMMIT =~ ^[0-9a-f]{40}$ ]] || die "Invalid aur_commit: $AUR_COMMIT"
+        runuser -u builduser -- git -C "$source_dir" checkout --quiet --detach "$AUR_COMMIT" ||
+            die "The reviewed AUR commit $AUR_COMMIT is not in the AUR repository"
+        source_commit=$AUR_COMMIT
+        log "Building the reviewed AUR commit: $AUR_COMMIT"
+    fi
+
     local pkgdir
     pkgdir=$(select_pkgbuild_dir "$source_dir")
     as_root chown -R builduser:builduser "$source_dir"
     patch_testing_branch "$pkgdir/PKGBUILD"
+
+    # AUR only: rebuild the same AUR version (e.g. after the Python minor
+    # version changed) as pkgrel 4.1, 4.2... so pacman upgrades machines that
+    # already have the old build.
+    if [[ $BUILD_ENV == aur && -n $AUR_PKGREL ]]; then
+        [[ $AUR_PKGREL =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "Invalid aur_pkgrel: $AUR_PKGREL"
+        grep -q '^pkgrel=' "$pkgdir/PKGBUILD" || die 'PKGBUILD has no pkgrel= line'
+        log "Rebuild: pkgrel $(sed -n 's/^pkgrel=//p' "$pkgdir/PKGBUILD") -> $AUR_PKGREL"
+        as_root sed -i "s/^pkgrel=.*/pkgrel=$AUR_PKGREL/" "$pkgdir/PKGBUILD"
+    fi
 
     import_source_keys "$pkgdir"
     if [[ $BUILD_ENV == aur ]]; then

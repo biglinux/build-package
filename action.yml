@@ -30,6 +30,14 @@ inputs:
   pkgbuild_path:
     description: Directory containing PKGBUILD, relative to the source repository
     required: false
+  aur_commit:
+    description: AUR only - build exactly this commit of the AUR repository (the one Repo Management reviewed)
+    required: false
+    default: ""
+  aur_pkgrel:
+    description: AUR only - pkgrel to build with (e.g. 4.1), to rebuild the same AUR version so pacman upgrades it
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -46,5 +54,7 @@ runs:
         MANJARO_BRANCH: ${{ inputs.manjaro_branch }}
         PACMAN_MIRROR: ${{ inputs.pacman_mirror }}
         PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
+        AUR_COMMIT: ${{ inputs.aur_commit }}
+        AUR_PKGREL: ${{ inputs.aur_pkgrel }}
         DIST_DIR: ${{ github.workspace }}/dist
       run: bash "$GITHUB_ACTION_PATH/scripts/build-package.sh"

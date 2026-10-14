@@ -16,6 +16,14 @@ on:
         description: Optional complete Manjaro mirror URL
         required: false
         type: string
+      aur_commit:
+        description: Build exactly this AUR commit (40-char hash, as reviewed)
+        required: false
+        type: string
+      pkgrel:
+        description: Rebuild the same AUR version with this pkgrel (e.g. 4.1)
+        required: false
+        type: string
       push_to_repo:
         description: Upload to the BigLinux package repository
         required: true
@@ -43,6 +51,8 @@ jobs:
       manjaro_branch: stable
       pacman_mirror: ${{ github.event_name == 'workflow_dispatch' && inputs.pacman_mirror || github.event.client_payload.pacman_mirror || '' }}
       builder_image: ${{ vars.BIGLINUX_BUILDER_IMAGE || 'talesam/community-build:latest' }}
+      aur_commit: ${{ github.event_name == 'workflow_dispatch' && inputs.aur_commit || github.event.client_payload.aur_commit || '' }}
+      aur_pkgrel: ${{ github.event_name == 'workflow_dispatch' && inputs.pkgrel || github.event.client_payload.pkgrel || '' }}
       publish_github: ${{ 'false' }}
       push_to_repo: ${{ github.event_name == 'workflow_dispatch' && inputs.push_to_repo || 'true' }}
       update_db: ${{ github.event_name == 'workflow_dispatch' && inputs.update_db || 'true' }}

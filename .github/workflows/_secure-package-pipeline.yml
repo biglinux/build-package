@@ -35,6 +35,16 @@ on:
         required: false
         type: string
         default: ""
+      aur_commit:
+        description: AUR only - reviewed AUR commit to build
+        required: false
+        type: string
+        default: ""
+      aur_pkgrel:
+        description: AUR only - pkgrel for a rebuild of the same version
+        required: false
+        type: string
+        default: ""
       builder_image:
         required: false
         type: string
@@ -97,6 +107,8 @@ jobs:
           manjaro_branch: ${{ inputs.manjaro_branch }}
           pacman_mirror: ${{ inputs.pacman_mirror }}
           pkgbuild_path: ${{ inputs.pkgbuild_path }}
+          aur_commit: ${{ inputs.aur_commit }}
+          aur_pkgrel: ${{ inputs.aur_pkgrel }}
 
       - name: Upload unsigned package artifact
         id: upload
@@ -185,6 +197,12 @@ jobs:
           REPO_USER: ${{ secrets.PKGBUILD_USER }}
           REPO_PORT: ${{ secrets.PKGBUILD_PORT }}
           REPO_DIR: ${{ secrets.PKGBUILD_DIR }}
+          # Repository variables (Settings > Variables): database prefix,
+          # where AUR builds go and the server-side CDN77 upload step.
+          REPO_DB_PREFIX: ${{ vars.REPO_DB_PREFIX || 'biglinux' }}
+          REPO_AUR_BRANCH: ${{ vars.REPO_AUR_BRANCH || 'testing' }}
+          REPO_INCLUDE_SIGS: ${{ vars.REPO_INCLUDE_SIGS || 'false' }}
+          REPO_POST_PUBLISH: ${{ vars.REPO_POST_PUBLISH || '' }}
           GH_TOKEN: ${{ secrets.REPOSITORY_TOKEN || github.token }}
         run: ./scripts/publish-package.sh
 

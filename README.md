@@ -78,7 +78,7 @@ It can be started manually with `workflow_dispatch` or remotely with `repository
 
 Main features:
 
-- supports `stable`, `testing`, and `extra` destinations;
+- supports the BigLinux `stable` and `testing` destinations (databases `biglinux-stable` and `biglinux-testing`);
 - supports selecting the Manjaro branch used during the rolling update;
 - supports a specific source branch;
 - supports repositories containing more than one PKGBUILD;
@@ -98,7 +98,8 @@ Main features:
 - validates that the requested package name matches the AUR repository name;
 - builds against the current rolling-release repositories;
 - installs declared AUR dependencies when required;
-- publishes the resulting package to `community-extra`;
+- publishes the resulting package to the repository set in `REPO_AUR_BRANCH` (`testing` by default);
+- can build the exact AUR commit reviewed by Repo Management (`aur_commit`) and rebuild the same version with a new `pkgrel` (`pkgrel`, e.g. `4.1`);
 - uses the same isolated build and publication model as BigLinux packages.
 
 ### Reusable Package Pipeline
@@ -168,6 +169,22 @@ scripts/
 
 The scripts are part of the action and must remain executable.
 
+### Repository variables
+
+Set in *Settings → Secrets and variables → Actions → Variables*:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `REPO_DB_PREFIX` | `biglinux` | Database prefix: `<prefix>-<branch>.db` |
+| `REPO_AUR_BRANCH` | `testing` | Repository that receives AUR builds (`testing` or `stable`) |
+| `REPO_INCLUDE_SIGS` | `false` | Embed signatures in the database (`repo-add --include-sigs`) |
+| `REPO_POST_PUBLISH` | empty | Absolute path of a program on the repository server, run with the repository directory while the publish lock is held, after the database is rebuilt. BigLinux uses it to upload the changed files to the CDN77 bucket and purge the cached database. |
+
+The repository server keeps `<PKGBUILD_DIR>/<branch>/x86_64`. Publication
+uploads to a staging directory, then — under `flock` on `.publish.lock` —
+moves the files in, runs `repo-add --remove --prevent-downgrade`, deletes
+orphaned `.sig`/`.sha256` files and runs `REPO_POST_PUBLISH`.
+
 ### Manual build
 
 1. Open the repository on GitHub.
@@ -212,7 +229,7 @@ AUR packages require an event type beginning with `aur-`:
 |---|---:|---|
 | `package_name` | Yes | Package or pkgbase name. |
 | `source_url` | Yes | HTTPS Git repository containing the PKGBUILD. |
-| `branch_type` | Yes | Destination: `testing`, `extra`, or `stable`. |
+| `branch_type` | Yes | Destination: `testing` or `stable`. |
 | `source_branch` | No | Git branch to clone from the source repository. |
 | `new_branch` | No | Branch applied to existing BigLinux Git sources in testing builds. |
 | `pkgbuild_path` | No | Directory containing the PKGBUILD when the repository has more than one. |
@@ -233,7 +250,9 @@ GitHub releases are not created for `testing` or AUR builds.
 | `aur_url` | Yes | AUR Git repository URL. |
 | `pacman_mirror` | No | Complete Manjaro mirror URL overriding the automatic mirror. |
 | `push_to_repo` | Yes | Upload packages to the BigLinux package server. |
-| `update_db` | Yes | Update the `community-extra` repository database. |
+| `update_db` | Yes | Update the database of the AUR destination repository. |
+| `aur_commit` | No | Build exactly this AUR commit (40-character hash). |
+| `pkgrel` | No | Rebuild the same AUR version with this `pkgrel` (e.g. `4.1`). |
 
 ### Composite action
 

@@ -148,13 +148,21 @@ setup_ssh() {
     RSYNC_SSH="ssh -i '$SSH_KEY_FILE' -p '$REPO_PORT' -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='$SSH_HOSTS_FILE'"
 }
 
+# BigLinux repositories: <REPO_DIR>/<branch>/x86_64 with database
+# <prefix>-<branch> (biglinux-stable, biglinux-testing). There is no extra
+# repository: AUR builds go to REPO_AUR_BRANCH (testing unless configured).
 repo_coordinates() {
+    local prefix=${REPO_DB_PREFIX:-biglinux}
+    local aur_branch=${REPO_AUR_BRANCH:-testing}
+    [[ $prefix =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "Invalid REPO_DB_PREFIX: $prefix"
+    [[ $aur_branch =~ ^(stable|testing)$ ]] || die "Invalid REPO_AUR_BRANCH: $aur_branch"
     case "$BRANCH_TYPE" in
-        stable) REPO_BRANCH=stable; DB_NAME=community-stable ;;
-        testing) REPO_BRANCH=testing; DB_NAME=community-testing ;;
-        extra|aur) REPO_BRANCH=extra; DB_NAME=community-extra ;;
+        stable | testing) REPO_BRANCH=$BRANCH_TYPE ;;
+        aur) REPO_BRANCH=$aur_branch ;;
+        extra) die 'BigLinux has no extra repository; use testing or stable' ;;
         *) die "Invalid BRANCH_TYPE: $BRANCH_TYPE" ;;
     esac
+    DB_NAME="$prefix-$REPO_BRANCH"
     TARGET_DIR="${REPO_DIR%/}/$REPO_BRANCH/x86_64"
 }
 
@@ -187,13 +195,26 @@ REMOTE_NO_DB
         return
     fi
 
+    # Optional program on the repository server, run while the publish lock is
+    # still held, once the database is rebuilt: for BigLinux it uploads the
+    # changed files to the CDN77 bucket and purges the cached database.
+    local post_publish=${REPO_POST_PUBLISH:-}
+    if [[ -n $post_publish ]]; then
+        [[ $post_publish =~ ^/[A-Za-z0-9._/-]+$ && /$post_publish/ != */../* ]] || \
+            die 'REPO_POST_PUBLISH must be a safe absolute path'
+    fi
+    local include_sigs=${REPO_INCLUDE_SIGS:-false}
+    validate_boolean "$include_sigs" REPO_INCLUDE_SIGS
+
     log "Updating repository database: $DB_NAME"
     "${SSH_CMD[@]}" "$REPO_USER@$REPO_HOST" \
-        bash -s -- "$incoming" "$TARGET_DIR" "$DB_NAME" <<'REMOTE_PUBLISH'
+        bash -s -- "$incoming" "$TARGET_DIR" "$DB_NAME" "$include_sigs" "$post_publish" <<'REMOTE_PUBLISH'
 set -Eeuo pipefail
 incoming=$1
 target=$2
 db_name=$3
+include_sigs=$4
+post_publish=$5
 
 mkdir -p "$target"
 exec 9>"$target/.publish.lock"
@@ -211,8 +232,10 @@ find "$incoming" -maxdepth 1 -type f -exec mv -f -t "$target" -- {} +
 rmdir "$incoming"
 
 cd "$target"
-repo-add --remove --wait-for-lock --prevent-downgrade --include-sigs \
-    "${db_name}.db.tar.gz" "${packages[@]}"
+repo_add_args=(--remove --wait-for-lock --prevent-downgrade)
+# The BigLinux databases never embedded signatures: pacman downloads the .sig.
+[[ ${include_sigs,,} == true ]] && repo_add_args+=(--include-sigs)
+repo-add "${repo_add_args[@]}" "${db_name}.db.tar.gz" "${packages[@]}"
 
 # repo-add removes superseded packages. Remove detached metadata left behind.
 find . -maxdepth 1 -type f \( -name '*.sig' -o -name '*.sha256' \) -print0 |
@@ -221,6 +244,11 @@ while IFS= read -r -d '' file; do
     base=${base%.sha256}
     [[ -f $base ]] || rm -f -- "$file"
 done
+
+if [[ -n $post_publish ]]; then
+    echo "Running post-publish step: $post_publish $target"
+    "$post_publish" "$target"
+fi
 REMOTE_PUBLISH
 }
 
@@ -291,7 +319,7 @@ main() {
     require_value PACKAGE_NAME "${PACKAGE_NAME:-}"
     require_value BRANCH_TYPE "${BRANCH_TYPE:-}"
     [[ $PACKAGE_NAME =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]*$ ]] || die 'Invalid PACKAGE_NAME'
-    [[ $BRANCH_TYPE =~ ^(stable|testing|extra|aur)$ ]] || die 'Invalid BRANCH_TYPE'
+    [[ $BRANCH_TYPE =~ ^(stable|testing|aur)$ ]] || die 'Invalid BRANCH_TYPE (BigLinux: stable, testing or aur)'
     validate_boolean "$PUBLISH_GITHUB" PUBLISH_GITHUB
     validate_boolean "$PUSH_TO_REPO" PUSH_TO_REPO
     validate_boolean "$UPDATE_DB" UPDATE_DB
