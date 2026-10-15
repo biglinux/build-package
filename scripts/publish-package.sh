@@ -163,17 +163,18 @@ setup_ssh() {
 }
 
 # BigLinux repositories: <REPO_DIR>/<branch>/x86_64 with database
-# <prefix>-<branch> (biglinux-stable, biglinux-testing). There is no extra
-# repository: AUR builds go to REPO_AUR_BRANCH (testing unless configured).
+# <prefix>-<branch> (biglinux-stable, biglinux-testing, biglinux-extra).
+# Packages from BigLinux's own repositories go to testing/stable; AUR and
+# third-party packages go to extra. AUR builds use REPO_AUR_BRANCH (extra
+# unless configured).
 repo_coordinates() {
     local prefix=${REPO_DB_PREFIX:-biglinux}
-    local aur_branch=${REPO_AUR_BRANCH:-testing}
+    local aur_branch=${REPO_AUR_BRANCH:-extra}
     [[ $prefix =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "Invalid REPO_DB_PREFIX: $prefix"
-    [[ $aur_branch =~ ^(stable|testing)$ ]] || die "Invalid REPO_AUR_BRANCH: $aur_branch"
+    [[ $aur_branch =~ ^(stable|testing|extra)$ ]] || die "Invalid REPO_AUR_BRANCH: $aur_branch"
     case "$BRANCH_TYPE" in
-        stable | testing) REPO_BRANCH=$BRANCH_TYPE ;;
+        stable | testing | extra) REPO_BRANCH=$BRANCH_TYPE ;;
         aur) REPO_BRANCH=$aur_branch ;;
-        extra) die 'BigLinux has no extra repository; use testing or stable' ;;
         *) die "Invalid BRANCH_TYPE: $BRANCH_TYPE" ;;
     esac
     DB_NAME="$prefix-$REPO_BRANCH"
@@ -334,7 +335,7 @@ main() {
     require_value PACKAGE_NAME "${PACKAGE_NAME:-}"
     require_value BRANCH_TYPE "${BRANCH_TYPE:-}"
     [[ $PACKAGE_NAME =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]*$ ]] || die 'Invalid PACKAGE_NAME'
-    [[ $BRANCH_TYPE =~ ^(stable|testing|aur)$ ]] || die 'Invalid BRANCH_TYPE (BigLinux: stable, testing or aur)'
+    [[ $BRANCH_TYPE =~ ^(stable|testing|extra|aur)$ ]] || die 'Invalid BRANCH_TYPE (BigLinux: stable, testing, extra or aur)'
     validate_boolean "$PUBLISH_GITHUB" PUBLISH_GITHUB
     validate_boolean "$PUSH_TO_REPO" PUSH_TO_REPO
     validate_boolean "$UPDATE_DB" UPDATE_DB

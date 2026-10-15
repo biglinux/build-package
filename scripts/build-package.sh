@@ -98,27 +98,30 @@ configure_repositories() {
 
     strip_repo_sections /etc/pacman.conf \
         community-stable community-testing community-extra \
-        biglinux-stable biglinux-testing
+        biglinux-stable biglinux-testing biglinux-extra
 
     # Repository order is intentional: the target branch comes first and
     # stable repositories are only fallbacks where required.
     case "$branch" in
         stable)
             append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
-            append_repo biglinux-stable "https://repo.biglinux.com.br/stable/\$arch"
+            append_repo biglinux-stable "https://packages.biglinux.com.br/stable/\$arch"
+            append_repo biglinux-extra "https://packages.biglinux.com.br/extra/\$arch"
             ;;
         testing)
             append_repo community-testing "https://repo.communitybig.org/testing/\$arch"
             append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
-            append_repo biglinux-testing "https://repo.biglinux.com.br/testing/\$arch"
-            append_repo biglinux-stable "https://repo.biglinux.com.br/stable/\$arch"
+            append_repo biglinux-testing "https://packages.biglinux.com.br/testing/\$arch"
+            append_repo biglinux-stable "https://packages.biglinux.com.br/stable/\$arch"
+            append_repo biglinux-extra "https://packages.biglinux.com.br/extra/\$arch"
             ;;
         extra|aur)
             append_repo community-extra "https://repo.communitybig.org/extra/\$arch"
             append_repo community-testing "https://repo.communitybig.org/testing/\$arch"
             append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
-            append_repo biglinux-testing "https://repo.biglinux.com.br/testing/\$arch"
-            append_repo biglinux-stable "https://repo.biglinux.com.br/stable/\$arch"
+            append_repo biglinux-extra "https://packages.biglinux.com.br/extra/\$arch"
+            append_repo biglinux-testing "https://packages.biglinux.com.br/testing/\$arch"
+            append_repo biglinux-stable "https://packages.biglinux.com.br/stable/\$arch"
             ;;
     esac
 

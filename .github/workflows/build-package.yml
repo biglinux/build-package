@@ -21,7 +21,7 @@ on:
         description: Destination repository branch
         required: true
         type: choice
-        options: [testing, stable]
+        options: [testing, stable, extra]
       source_branch:
         description: Source Git branch (optional)
         required: false

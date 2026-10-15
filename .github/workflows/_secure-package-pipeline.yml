@@ -200,7 +200,7 @@ jobs:
           # Repository variables (Settings > Variables): database prefix,
           # where AUR builds go and the server-side CDN77 upload step.
           REPO_DB_PREFIX: ${{ vars.REPO_DB_PREFIX || 'biglinux' }}
-          REPO_AUR_BRANCH: ${{ vars.REPO_AUR_BRANCH || 'testing' }}
+          REPO_AUR_BRANCH: ${{ vars.REPO_AUR_BRANCH || 'extra' }}
           REPO_INCLUDE_SIGS: ${{ vars.REPO_INCLUDE_SIGS || 'false' }}
           REPO_POST_PUBLISH: ${{ vars.REPO_POST_PUBLISH || '' }}
           GH_TOKEN: ${{ secrets.REPOSITORY_TOKEN || github.token }}

@@ -98,7 +98,7 @@ Main features:
 - validates that the requested package name matches the AUR repository name;
 - builds against the current rolling-release repositories;
 - installs declared AUR dependencies when required;
-- publishes the resulting package to the repository set in `REPO_AUR_BRANCH` (`testing` by default);
+- publishes the resulting package to the repository set in `REPO_AUR_BRANCH` (`extra` by default);
 - can build the exact AUR commit reviewed by Repo Management (`aur_commit`) and rebuild the same version with a new `pkgrel` (`pkgrel`, e.g. `4.1`);
 - uses the same isolated build and publication model as BigLinux packages.
 
@@ -176,7 +176,7 @@ Set in *Settings → Secrets and variables → Actions → Variables*:
 | Variable | Default | Purpose |
 |---|---|---|
 | `REPO_DB_PREFIX` | `biglinux` | Database prefix: `<prefix>-<branch>.db` |
-| `REPO_AUR_BRANCH` | `testing` | Repository that receives AUR builds (`testing` or `stable`) |
+| `REPO_AUR_BRANCH` | `extra` | Repository that receives AUR builds (`extra`, `testing` or `stable`) |
 | `REPO_INCLUDE_SIGS` | `false` | Embed signatures in the database (`repo-add --include-sigs`) |
 | `REPO_POST_PUBLISH` | empty | Absolute path of a program on the repository server, run with the repository directory while the publish lock is held, after the database is rebuilt. BigLinux uses it to upload the changed files to the CDN77 bucket and purge the cached database. |
 
@@ -229,7 +229,7 @@ AUR packages require an event type beginning with `aur-`:
 |---|---:|---|
 | `package_name` | Yes | Package or pkgbase name. |
 | `source_url` | Yes | HTTPS Git repository containing the PKGBUILD. |
-| `branch_type` | Yes | Destination: `testing` or `stable`. |
+| `branch_type` | Yes | Destination: `testing`, `stable` or `extra` (AUR and third-party packages). |
 | `source_branch` | No | Git branch to clone from the source repository. |
 | `new_branch` | No | Branch applied to existing BigLinux Git sources in testing builds. |
 | `pkgbuild_path` | No | Directory containing the PKGBUILD when the repository has more than one. |
