@@ -47,6 +47,9 @@ jobs:
       contents: write
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.action, 'aur-') }}
     uses: ./.github/workflows/_secure-package-pipeline.yml
+    # A reusable workflow receives no secrets unless the caller passes them:
+    # without this the GPG key, the SSH key and the server arrived empty.
+    secrets: inherit
     with:
       build_env: aur
       branch_type: aur
