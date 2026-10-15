@@ -136,12 +136,18 @@ jobs:
           aur_commit: ${{ inputs.aur_commit }}
           aur_pkgrel: ${{ inputs.aur_pkgrel }}
 
+      # Artifacts refuse ':' in file names, and a package with an epoch has
+      # one (name-1:2.0-1-any.pkg.tar.zst): the files travel inside a tar.
+      - name: Pack build output
+        shell: bash
+        run: tar -C dist -cf package.tar .
+
       - name: Upload unsigned package artifact
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/
+          path: package.tar
           if-no-files-found: error
           compression-level: 0
           retention-days: 2
@@ -196,6 +202,12 @@ jobs:
           name: package-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifact
           digest-mismatch: error
+
+      - name: Unpack build output
+        shell: bash
+        run: |
+          tar -C artifact --no-same-owner --no-same-permissions -xf artifact/package.tar
+          rm -f artifact/package.tar
 
       - name: Verify publication tools
         shell: bash

@@ -18,13 +18,18 @@ tg_send() {
     # shellcheck disable=SC2001  # a regex, not a fixed string
     sed "s/<[^>]*>//g" <<< "$message"
     [[ -n ${TELEGRAM_TOKEN:-} && -n ${TELEGRAM_CHAT_ID:-} ]] || return 0
-    curl --silent --show-error --max-time 20 \
+    local answer
+    answer=$(curl --silent --show-error --max-time 20 \
         --request POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
         --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
         --data-urlencode "text=${message}" \
         --data-urlencode 'parse_mode=HTML' \
-        --data-urlencode 'disable_web_page_preview=true' >/dev/null ||
-        printf 'warning: Telegram message not sent\n' >&2
+        --data-urlencode 'disable_web_page_preview=true' 2>&1) || true
+    # The API answers HTTP errors with a JSON description: show it.
+    if [[ $answer != *'"ok":true'* ]]; then
+        printf '::warning::Telegram message not sent: %s\n' \
+            "$(sed -n 's/.*"description":"\([^"]*\)".*/\1/p' <<< "$answer" | head -1)" >&2
+    fi
     return 0
 }
 
