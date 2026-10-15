@@ -33,9 +33,11 @@ validate_archive_paths() {
 archive_member() {
     local file=$1 wanted=$2
 
+    # awk reads the whole listing: exiting at the first match would kill tar
+    # with SIGPIPE, and under pipefail the script would stop without a message.
     tar -tf "$file" |
         awk -v plain="$wanted" -v dotted="./$wanted" \
-            '$0 == plain || $0 == dotted {print; exit}'
+            '!found && ($0 == plain || $0 == dotted) {print; found = 1}'
 }
 
 pkginfo_field() {
@@ -213,8 +215,9 @@ set -Eeuo pipefail
 incoming=$1
 target=$2
 db_name=$3
-include_sigs=$4
-post_publish=$5
+# ssh joins the arguments into one command line: an empty argument disappears
+include_sigs=${4:-false}
+post_publish=${5:-}
 
 mkdir -p "$target"
 exec 9>"$target/.publish.lock"

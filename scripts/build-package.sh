@@ -12,17 +12,28 @@ as_root() {
     fi
 }
 
+# Run as builduser. The builder container already runs as builduser, and
+# runuser only works for root: switch users only when we are someone else.
+as_builduser() {
+    if [[ $(id -un) == builduser ]]; then
+        "$@"
+    else
+        as_root runuser -u builduser -- "$@"
+    fi
+}
+
 as_builduser_in() {
     local directory=$1
     shift
 
     # The command is intentionally single-quoted so the inner Bash expands it.
     # shellcheck disable=SC2016
-    runuser -u builduser -- env \
+    as_builduser env \
         HOME=/home/builduser \
         SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}" \
         BIGLINUX_BUILD_VERSION="${BIGLINUX_BUILD_VERSION:-}" \
         BIGLINUX_GIT_BRANCH="${BIGLINUX_GIT_BRANCH:-}" \
+        BIG_PKGSTAMP="${BIG_PKGSTAMP:-}" \
         bash -c 'directory=$1; shift; cd -- "$directory"; exec "$@"' \
         _ "$directory" "$@"
 }
@@ -44,8 +55,11 @@ validate_enum() {
 strip_repo_sections() {
     local file=$1
     shift
-    local sections
+    local sections tmp
     sections="|$(IFS='|'; printf '%s' "$*")|"
+    # The build runs as an unprivileged user: write the new file outside /etc,
+    # then install it with root.
+    tmp=$(mktemp)
     awk -v sections="$sections" '
         /^\[[^]]+\]$/ {
             name=$0
@@ -53,9 +67,9 @@ strip_repo_sections() {
             skip=(index(sections, "|" name "|") > 0)
         }
         !skip { print }
-    ' "$file" > "$file.tmp"
-    as_root install -m 0644 "$file.tmp" "$file"
-    rm -f "$file.tmp"
+    ' "$file" > "$tmp"
+    as_root install -m 0644 "$tmp" "$file"
+    rm -f "$tmp"
 }
 
 append_repo() {
@@ -258,7 +272,7 @@ import_source_keys() {
     for key in "${keys[@]}"; do
         [[ $key =~ ^[A-Fa-f0-9]{16,64}$ ]] || die "Invalid validpgpkeys value: $key"
         log "Importing source verification key: $key"
-        runuser -u builduser -- env HOME=/home/builduser \
+        as_builduser env HOME=/home/builduser \
             gpg --batch --keyserver hkps://keyserver.ubuntu.com --recv-keys "$key"
     done
 }
@@ -281,7 +295,7 @@ install_aur_dependencies() {
 
     ((${#deps[@]} > 0)) || return 0
     log "Installing ${#deps[@]} declared dependencies with yay"
-    runuser -u builduser -- env HOME=/home/builduser \
+    as_builduser env HOME=/home/builduser \
         yay -S --asdeps --needed --noconfirm \
         --answerclean None --answerdiff None "${deps[@]}"
 }
@@ -317,7 +331,9 @@ validate_packages() {
 write_metadata() {
     local source_commit=$1 pkgdir=$2
     local metadata_dir="$DIST_DIR/metadata"
-    install -d "$DIST_DIR/packages" "$metadata_dir"
+    # The workspace belongs to the runner's user, not to builduser: create the
+    # artifact directories as root and hand them to the user writing into them.
+    as_root install -d -o "$(id -u)" -g "$(id -g)" "$DIST_DIR" "$DIST_DIR/packages" "$metadata_dir"
 
     cp -f /home/builduser/packages/*.pkg.tar.zst "$DIST_DIR/packages/"
     cp -f "$pkgdir/PKGBUILD" "$metadata_dir/PKGBUILD"
@@ -365,6 +381,10 @@ main() {
     # immediately before source preparation and compilation.
     export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u +%s)}
     export BIGLINUX_BUILD_VERSION=${BIGLINUX_BUILD_VERSION:-$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y%m%d.%H%M)}
+    # Date-stamped PKGBUILDs (BigLinux and BigCommunity) read BIG_PKGSTAMP when it
+    # is set and the clock otherwise. Fixing it here keeps every makepkg call --
+    # the build and the --packagelist check minutes later -- on the same version.
+    export BIG_PKGSTAMP=${BIG_PKGSTAMP:-$(date -u -d "@$SOURCE_DATE_EPOCH" +%y.%m.%d-%H%M)}
     export BUILD_STARTED_AT
     BUILD_STARTED_AT=$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)
     export BIGLINUX_GIT_BRANCH=${NEW_BRANCH:-${SOURCE_BRANCH:-}}
@@ -375,7 +395,7 @@ main() {
     as_root rmdir "$source_dir"
 
     local source_commit
-    source_commit=$(runuser -u builduser -- env \
+    source_commit=$(as_builduser env \
         HOME=/home/builduser BUILD_ENV="$BUILD_ENV" SOURCE_URL="$SOURCE_URL" \
         SOURCE_BRANCH="$SOURCE_BRANCH" PACKAGE_NAME="$PACKAGE_NAME" \
         bash -c "$(declare -f die log clone_source); clone_source '$source_dir'")
@@ -386,7 +406,7 @@ main() {
     # whatever was pushed in the meantime.
     if [[ $BUILD_ENV == aur && -n $AUR_COMMIT ]]; then
         [[ $AUR_COMMIT =~ ^[0-9a-f]{40}$ ]] || die "Invalid aur_commit: $AUR_COMMIT"
-        runuser -u builduser -- git -C "$source_dir" checkout --quiet --detach "$AUR_COMMIT" ||
+        as_builduser git -C "$source_dir" checkout --quiet --detach "$AUR_COMMIT" ||
             die "The reviewed AUR commit $AUR_COMMIT is not in the AUR repository"
         source_commit=$AUR_COMMIT
         log "Building the reviewed AUR commit: $AUR_COMMIT"

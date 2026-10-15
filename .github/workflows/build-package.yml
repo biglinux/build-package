@@ -1,7 +1,12 @@
 name: 📦 Build Package
 
 on:
+  # Every package request except AUR ones (aur-<package>, handled by
+  # aur-package-build.yml): without this filter one request started both.
   repository_dispatch:
+    types:
+      - "*"
+      - "!aur-*"
   workflow_dispatch:
     inputs:
       package_name:

@@ -1,7 +1,9 @@
 name: 🧰 AUR Package Build
 
 on:
+  # Only AUR requests (aur-<package>); package builds go to build-package.yml.
   repository_dispatch:
+    types: ["aur-*"]
   workflow_dispatch:
     inputs:
       package_name:
@@ -39,8 +41,10 @@ on:
 
 jobs:
   package:
+    # The reusable pipeline's publish job declares contents: write; a caller
+    # that grants less makes GitHub refuse to start the run (startup failure).
     permissions:
-      contents: read
+      contents: write
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.action, 'aur-') }}
     uses: ./.github/workflows/_secure-package-pipeline.yml
     with:
