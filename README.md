@@ -144,7 +144,8 @@ The shell logic is kept in regular script files instead of being embedded in lar
 |---|---|
 | `scripts/build-package.sh` | Configure repositories, update the system, clone the source, run `makepkg`, execute Namcap, and prepare the artifact. |
 | `scripts/publish-package.sh` | Validate package metadata, sign packages, upload through SSH, update the repository database, and optionally create a GitHub release. |
-| `scripts/notify.sh` | Send the final workflow result to Telegram. |
+| `scripts/notify.sh` | Telegram: start (step 1/4) and final result (step 4/4 or failure alert). |
+| `scripts/telegram.sh` | Telegram helpers shared by the scripts; messages use the big-comm format. Steps 2/4 and 3/4 are sent by `publish-package.sh`. |
 
 Keeping this logic in scripts makes it easier to read, test with ShellCheck, and reuse without turning the workflow YAML into a large shell program.
 
@@ -165,6 +166,7 @@ scripts/
   build-package.sh
   notify.sh
   publish-package.sh
+  telegram.sh
 ```
 
 The scripts are part of the action and must remain executable.
@@ -437,7 +439,7 @@ The pipeline can be customized by:
 - setting `BIGLINUX_BUILDER_IMAGE` in GitHub repository variables;
 - changing build or publication inputs in the entry workflows;
 - extending validation in `scripts/publish-package.sh`;
-- adjusting Telegram messages in `scripts/notify.sh`.
+- adjusting Telegram messages in `scripts/notify.sh` and `scripts/publish-package.sh`.
 
 Avoid placing arbitrary commands, interactive tmate sessions, or source-changing automation in the production pipeline. Those operations should use separate workflows without package publication credentials.
 

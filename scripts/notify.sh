@@ -1,36 +1,73 @@
 #!/usr/bin/env bash
+# Telegram notifications of the package pipeline, in the big-comm format:
+#   notify.sh start               [step 1/4] starting package creation
+#   notify.sh finish STATUS       [step 4/4] finished, or the failure alert
+# Steps 2/4 and 3/4 are sent by publish-package.sh.
 set -Eeuo pipefail
 
-[[ -n ${TELEGRAM_TOKEN:-} && -n ${TELEGRAM_CHAT_ID:-} ]] || exit 0
+# shellcheck source=scripts/telegram.sh
+source "$(dirname "${BASH_SOURCE[0]}")/telegram.sh"
 
-html_escape() {
-    local value=$1
-    value=${value//&/&amp;}
-    value=${value//</&lt;}
-    value=${value//>/&gt;}
-    printf '%s' "$value"
+package=$(tg_escape "${PACKAGE_NAME:-unknown}")
+
+last_commit_message() {
+    local url=${SOURCE_URL:-} ref=${SOURCE_BRANCH:-HEAD} hash tmp
+    [[ $url =~ ^https://[^[:space:]]+$ ]] || return 0
+    hash=$(git ls-remote "$url" "$ref" 2>/dev/null | awk 'NR == 1 {print $1}') || return 0
+    [[ $hash =~ ^[0-9a-f]{40}$ ]] || return 0
+    tmp=$(mktemp -d)
+    if git -C "$tmp" init -q && git -C "$tmp" fetch -q --depth=1 "$url" "$hash" 2>/dev/null; then
+        git -C "$tmp" log -1 --format=%B FETCH_HEAD | sed '/^$/d' | head -5
+    fi
+    rm -rf "$tmp"
 }
 
-status=${1:-unknown}
-package=$(html_escape "${2:-unknown}")
-branch=$(html_escape "${3:-unknown}")
-url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+start() {
+    local commit
+    commit=$(last_commit_message || true)
+    tg_send "🏁 <b>[step 1/4] build-package - STARTING PACKAGE CREATION</b>
+$(tg_header)
+<b>Name:</b> <code>${package}</code>
+<b>Commit:</b> <code>$(tg_escape "${commit:-unavailable}")</code>
+<b>Source:</b> <code>$(tg_escape "${SOURCE_URL:-unknown}")</code>
+<b>Started/Triggered by:</b> <code>$(tg_escape "${GITHUB_ACTOR:-?}/${GITHUB_TRIGGERING_ACTOR:-?}")</code>
+<b>Branch:</b> <code>$(tg_escape "${BRANCH_TYPE:-unknown}")</code>"
+}
 
-case "$status" in
-    success) icon='✅'; title='Package published successfully' ;;
-    build-success) icon='✅'; title='Package built successfully' ;;
-    build-failure) icon='❌'; title='Package build failed' ;;
-    publish-failure) icon='❌'; title='Package publication failed' ;;
-    *) icon='ℹ️'; title='Package workflow finished' ;;
-esac
+finish() {
+    local status=$1 run_url
+    run_url="https://github.com/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}"
 
-message="${icon} <b>${title}</b>
+    if [[ $status != success && $status != build-success ]]; then
+        tg_send "🚨 <b>FAILED to create package:</b>
+<b>Job:</b> <code>#${GITHUB_RUN_NUMBER:-?}</code>
 <b>Package:</b> <code>${package}</code>
-<b>Branch:</b> <code>${branch}</code>
-<b>Run:</b> <a href=\"${url}\">#${GITHUB_RUN_NUMBER}</a>"
+<b>Branch:</b> <code>$(tg_escape "${BRANCH_TYPE:-unknown}")</code>
+<b>Error URL:</b> <a href='${run_url}'>${run_url}</a>"
+        return
+    fi
 
-curl --fail --silent --show-error \
-    --request POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-    --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-    --data-urlencode "text=${message}" \
-    --data-urlencode 'parse_mode=HTML' >/dev/null
+    local start end duration hours minutes seconds files branch
+    start=${STARTED_AT:-}
+    [[ $start =~ ^[0-9]+$ ]] || start=$(date +%s)
+    end=$(date +%s)
+    duration=$((end - start))
+    hours=$((duration / 3600))
+    minutes=$(((duration % 3600) / 60))
+    seconds=$((duration % 60))
+    branch=${PUBLISHED_BRANCH:-${BRANCH_TYPE:-unknown}}
+    files=${PUBLISHED_FILES:-${PACKAGE_NAME:-unknown}}
+
+    tg_send "🏆 <b>[step 4/4] build-package - FINISHED AT 🕒:</b> <code>${hours}h ${minutes}m ${seconds}s</code>
+$(tg_header)
+<b>Package:</b> <code>$(tg_escape "${branch,,}/${files}")</code>
+<b>Start:</b> <code>$(tg_time "$start")</code>
+<b>End:</b> <code>$(tg_time "$end")</code>
+<b>Duration:</b> <code>${hours}h ${minutes}m ${seconds}s</code>"
+}
+
+case ${1:-} in
+    start) start ;;
+    finish) finish "${2:-unknown}" ;;
+    *) echo "usage: $0 start | finish STATUS" >&2; exit 2 ;;
+esac

@@ -5,6 +5,9 @@ log() { printf '==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 is_true() { [[ ${1,,} == true ]]; }
 
+# shellcheck source=scripts/telegram.sh
+source "$(dirname "${BASH_SOURCE[0]}")/telegram.sh"
+
 require_value() {
     local name=$1 value=${2-}
     [[ -n $value ]] || die "$name is required"
@@ -189,11 +192,30 @@ publish_to_repository() {
     log "Uploading packages to staging directory: $incoming"
     "${SSH_CMD[@]}" "$REPO_USER@$REPO_HOST" mkdir -p -- "$incoming"
 
-    rsync --archive --protect-args --chmod=F644 --rsh="$RSYNC_SSH" \
+    local package size branch=${REPO_BRANCH,,}
+    for package in "${PACKAGES[@]}"; do
+        size=$(stat -c %s "$package")
+        tg_send "✅ <b>[step 2/4] build-package - SENDING 📦 TO REPOSITORY</b>
+$(tg_header)
+<b>Package:</b> <code>$(tg_escape "$branch/$(basename "$package")")</code>
+<b>Size b/Kb/Mb:</b> <code>${size}/$((size / 1024))/$((size / 1024 / 1024))</code>
+<b>Repository:</b> <code>$(tg_escape "$DB_NAME")</code>
+<b>Branch:</b> <code>$(tg_escape "$branch")</code>"
+    done
+
+    if ! rsync --archive --protect-args --chmod=F644 --rsh="$RSYNC_SSH" \
         "$PACKAGE_DIR"/*.pkg.tar.zst \
         "$PACKAGE_DIR"/*.pkg.tar.zst.sig \
         "$PACKAGE_DIR"/*.pkg.tar.zst.sha256 \
-        "$REPO_USER@$REPO_HOST:$incoming/"
+        "$REPO_USER@$REPO_HOST:$incoming/"; then
+        for package in "${PACKAGES[@]}"; do
+            tg_send "❌ <b>[step 2/4] build-package - FAILED TO SEND PACKAGE</b>
+$(tg_header)
+<b>Package:</b> <code>$(tg_escape "$(basename "$package")")</code>
+<b>Branch:</b> <code>$(tg_escape "$branch")</code>"
+        done
+        die 'Failed to send the packages to the repository'
+    fi
 
     if ! is_true "$UPDATE_DB"; then
         "${SSH_CMD[@]}" "$REPO_USER@$REPO_HOST" \
@@ -222,7 +244,9 @@ REMOTE_NO_DB
     validate_boolean "$include_sigs" REPO_INCLUDE_SIGS
 
     log "Updating repository database: $DB_NAME"
-    "${SSH_CMD[@]}" "$REPO_USER@$REPO_HOST" \
+    tg_send "🧹<b>[step 3/4] build-package - STARTING CLEANUP OF OLD PACKAGES</b>
+<b>branch:</b> <code>$(tg_escape "${REPO_BRANCH^^}")</code>"
+    if ! "${SSH_CMD[@]}" "$REPO_USER@$REPO_HOST" \
         bash -s -- "$incoming" "$TARGET_DIR" "$DB_NAME" "$include_sigs" "$post_publish" <<'REMOTE_PUBLISH'
 set -Eeuo pipefail
 incoming=$1
@@ -266,6 +290,15 @@ if [[ -n $post_publish ]]; then
     "$post_publish" "$target"
 fi
 REMOTE_PUBLISH
+    then
+        tg_send "🧹 <b>[step 3.1/4] build-package - CLEANUP COMPLETED</b>
+❌ <b>The package is not published: the repository update failed</b>
+$(tg_header)"
+        die 'The repository update failed'
+    fi
+    tg_send "🧹 <b>[step 3.1/4] build-package - CLEANUP COMPLETED</b>
+✅ <b>Cleanup completed successfully</b>
+$(tg_header)"
 }
 
 release_repository() {
@@ -310,6 +343,12 @@ publish_github_release() {
     prepare_release_assets
 
     log "Publishing GitHub release $repository@$tag"
+    local started=${STARTED_AT:-}
+    [[ $started =~ ^[0-9]+$ ]] || started=$(date +%s)
+    tg_send "🕒 <b>[step 3.2/4] build-package - PREPARE PACKAGE FOR RELEASE</b>
+$(tg_header)
+<b>Package:</b> <code>$(tg_escape "${REPO_BRANCH:-$BRANCH_TYPE}/$(basename "${PACKAGES[0]}")")</code>
+<b>Start:</b> <code>$(tg_time "$started")</code>"
     if gh release view "$tag" --repo "$repository" >/dev/null 2>&1; then
         gh release upload "$tag" "$RELEASE_TMPDIR"/* --clobber --repo "$repository"
     else
@@ -360,6 +399,18 @@ main() {
     is_true "$PUSH_TO_REPO" && publish_to_repository
     if is_true "$PUBLISH_GITHUB" && [[ $BRANCH_TYPE != testing && $BRANCH_TYPE != aur ]]; then
         publish_github_release
+    fi
+
+    # For the final Telegram message (notify job): where it went, which files.
+    if [[ -n ${GITHUB_OUTPUT:-} ]]; then
+        local names=()
+        for package in "${PACKAGES[@]}"; do
+            names+=("$(basename "$package")")
+        done
+        {
+            printf 'branch=%s\n' "${REPO_BRANCH:-$BRANCH_TYPE}"
+            printf 'files=%s\n' "$(IFS=,; printf '%s' "${names[*]}")"
+        } >> "$GITHUB_OUTPUT"
     fi
 
     log 'Publication completed successfully'

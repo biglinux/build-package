@@ -70,6 +70,32 @@ permissions:
   contents: read
 
 jobs:
+  announce:
+    name: Announce start
+    # Runs alongside the build: only the Telegram secrets, no package code.
+    runs-on: ubuntu-latest
+    environment: package-notifications
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout notification script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Notify Telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TOKEN_BOT }}
+          TELEGRAM_CHAT_ID: ${{ secrets.CHAT_ID }}
+          PACKAGE_NAME: ${{ inputs.package_name }}
+          BRANCH_TYPE: ${{ inputs.branch_type }}
+          SOURCE_URL: ${{ inputs.source_url }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+        run: ./scripts/notify.sh start
+
   build:
     name: Build without secrets
     runs-on: ubuntu-latest
@@ -150,6 +176,9 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+    outputs:
+      branch: ${{ steps.publish.outputs.branch }}
+      files: ${{ steps.publish.outputs.files }}
     steps:
       - name: Record publication start
         shell: bash
@@ -179,6 +208,7 @@ jobs:
           done
 
       - name: Sign and publish
+        id: publish
         shell: bash
         env:
           ARTIFACT_DIR: ${{ github.workspace }}/artifact
@@ -204,6 +234,9 @@ jobs:
           REPO_INCLUDE_SIGS: ${{ vars.REPO_INCLUDE_SIGS || 'false' }}
           REPO_POST_PUBLISH: ${{ vars.REPO_POST_PUBLISH || '' }}
           GH_TOKEN: ${{ secrets.REPOSITORY_TOKEN || github.token }}
+          TELEGRAM_TOKEN: ${{ secrets.TOKEN_BOT }}
+          TELEGRAM_CHAT_ID: ${{ secrets.CHAT_ID }}
+          STARTED_AT: ${{ needs.build.outputs.started_at }}
         run: ./scripts/publish-package.sh
 
       - name: Report publication timing
@@ -260,7 +293,10 @@ jobs:
           FINAL_STATUS: ${{ steps.status.outputs.value }}
           PACKAGE_NAME: ${{ inputs.package_name }}
           BRANCH_TYPE: ${{ inputs.branch_type }}
-        run: ./scripts/notify.sh "$FINAL_STATUS" "$PACKAGE_NAME" "$BRANCH_TYPE"
+          STARTED_AT: ${{ needs.build.outputs.started_at }}
+          PUBLISHED_BRANCH: ${{ needs.publish.outputs.branch }}
+          PUBLISHED_FILES: ${{ needs.publish.outputs.files }}
+        run: ./scripts/notify.sh finish "$FINAL_STATUS"
 
       - name: Report total elapsed time
         if: always()
