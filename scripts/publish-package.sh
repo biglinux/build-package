@@ -339,7 +339,9 @@ publish_github_release() {
 
     local repository tag
     repository=$(release_repository)
-    tag=$PACKAGE_VERSION
+    # A Git tag cannot contain ':': like big-comm, the tag is pkgver-pkgrel
+    # without the epoch (1:26.10.15-1746 -> 26.10.15-1746).
+    tag=${PACKAGE_VERSION#*:}
     prepare_release_assets
 
     log "Publishing GitHub release $repository@$tag"
