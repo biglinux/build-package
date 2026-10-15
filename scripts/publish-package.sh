@@ -98,10 +98,22 @@ setup_gpg() {
     require_value GPG_PRIVATE_KEY "${GPG_PRIVATE_KEY:-}"
     require_value GPG_PASSPHRASE "${GPG_PASSPHRASE:-}"
 
+    # Fail with a message a person can act on, instead of gpg's
+    # "no valid OpenPGP data found".
+    [[ $GPG_PRIVATE_KEY == *"-----BEGIN PGP PRIVATE KEY BLOCK-----"* ]] || die \
+        'The GPG_PRIVATE_KEY secret is not an armored private key: it must hold the whole output of gpg --armor --export-secret-keys <FINGERPRINT>, from "-----BEGIN PGP PRIVATE KEY BLOCK-----" to "-----END PGP PRIVATE KEY BLOCK-----" (not the command itself)'
+
     export GNUPGHOME
     GNUPGHOME=$(mktemp -d)
     chmod 0700 "$GNUPGHOME"
-    gpg --batch --import <<< "$GPG_PRIVATE_KEY"
+    gpg --batch --import <<< "$GPG_PRIVATE_KEY" || die 'gpg could not import the GPG_PRIVATE_KEY secret'
+    # The passphrase is checked now, before anything is uploaded.
+    local probe
+    probe=$(mktemp)
+    printf '%s' "$GPG_PASSPHRASE" |
+        gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --detach-sign -o "$probe.sig" "$probe" 2>/dev/null ||
+        die 'The PASSPHRASE secret does not unlock the GPG key in GPG_PRIVATE_KEY'
+    rm -f "$probe" "$probe.sig"
 }
 
 sign_packages() {
