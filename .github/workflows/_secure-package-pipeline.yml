@@ -177,8 +177,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: package-production
+    # One queue per package, not per repository: GitHub keeps only one waiting run
+    # per group and cancels the rest, so a per-repository group lost the publish
+    # step of most builds dispatched together. Writes to the repository are
+    # serialised on the server by the .publish.lock flock (publish-package.sh).
     concurrency:
-      group: package-repository-${{ inputs.branch_type }}
+      group: package-publish-${{ inputs.branch_type }}-${{ inputs.package_name }}
       cancel-in-progress: false
     permissions:
       contents: write
