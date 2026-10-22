@@ -102,7 +102,9 @@ configure_repositories() {
 
     # The same line for every section, the way Arch and Manjaro write theirs:
     # pacman turns $repo into the section name (biglinux-stable/x86_64, ...).
+    # shellcheck disable=SC2016  # $repo and $arch are pacman's, not the shell's
     local biglinux='https://packages.biglinux.com.br/$repo/$arch'
+    # shellcheck disable=SC2016
     local community='https://repo.communitybig.org/$repo/$arch'
 
     # Repository order is intentional: the target branch comes first and
