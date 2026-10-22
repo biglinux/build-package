@@ -100,28 +100,33 @@ configure_repositories() {
         community-stable community-testing community-extra \
         biglinux-stable biglinux-testing biglinux-extra
 
+    # The same line for every section, the way Arch and Manjaro write theirs:
+    # pacman turns $repo into the section name (biglinux-stable/x86_64, ...).
+    local biglinux='https://packages.biglinux.com.br/$repo/$arch'
+    local community='https://repo.communitybig.org/$repo/$arch'
+
     # Repository order is intentional: the target branch comes first and
     # stable repositories are only fallbacks where required.
     case "$branch" in
         stable)
-            append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
-            append_repo biglinux-stable "https://packages.biglinux.com.br/stable/\$arch"
-            append_repo biglinux-extra "https://packages.biglinux.com.br/extra/\$arch"
+            append_repo community-stable "$community"
+            append_repo biglinux-stable "$biglinux"
+            append_repo biglinux-extra "$biglinux"
             ;;
         testing)
-            append_repo community-testing "https://repo.communitybig.org/testing/\$arch"
-            append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
-            append_repo biglinux-testing "https://packages.biglinux.com.br/testing/\$arch"
-            append_repo biglinux-stable "https://packages.biglinux.com.br/stable/\$arch"
-            append_repo biglinux-extra "https://packages.biglinux.com.br/extra/\$arch"
+            append_repo community-testing "$community"
+            append_repo community-stable "$community"
+            append_repo biglinux-testing "$biglinux"
+            append_repo biglinux-stable "$biglinux"
+            append_repo biglinux-extra "$biglinux"
             ;;
         extra|aur)
-            append_repo community-extra "https://repo.communitybig.org/extra/\$arch"
-            append_repo community-testing "https://repo.communitybig.org/testing/\$arch"
-            append_repo community-stable "https://repo.communitybig.org/stable/\$arch"
-            append_repo biglinux-extra "https://packages.biglinux.com.br/extra/\$arch"
-            append_repo biglinux-testing "https://packages.biglinux.com.br/testing/\$arch"
-            append_repo biglinux-stable "https://packages.biglinux.com.br/stable/\$arch"
+            append_repo community-extra "$community"
+            append_repo community-testing "$community"
+            append_repo community-stable "$community"
+            append_repo biglinux-extra "$biglinux"
+            append_repo biglinux-testing "$biglinux"
+            append_repo biglinux-stable "$biglinux"
             ;;
     esac
 
