@@ -244,9 +244,11 @@ patch_testing_branch() {
     local pkgbuild=$1 branch=${NEW_BRANCH:-}
     [[ $BRANCH_TYPE == testing && -n $branch ]] || return 0
     [[ $branch =~ ^[A-Za-z0-9._/-]+$ ]] || die 'Invalid testing branch name'
+    local pkgdir srcinfo
+    pkgdir=$(dirname "$pkgbuild")
 
-    # Compatibility for existing BigLinux PKGBUILDs. New PKGBUILDs should
-    # consume BIGLINUX_GIT_BRANCH directly instead of relying on this patch.
+    # 1. Sources written out literally: point them at the testing branch.
+    # New PKGBUILDs should consume BIGLINUX_GIT_BRANCH directly instead.
     python - "$pkgbuild" "$branch" <<'PY'
 from pathlib import Path
 import re
@@ -263,8 +265,69 @@ new_text, count = pattern.subn(lambda m: f"{m.group('url')}#branch={branch}", te
 if count:
     path.write_text(new_text)
     print(f"Patched {count} BigLinux Git source URL(s) for branch {branch}")
-else:
-    print("No BigLinux Git source URL required patching")
+PY
+
+    # 2. Sources built from variables, such as source=("git+${url}.git"), are
+    # invisible to the text search above. makepkg expands them -- run as
+    # builduser, exactly like the build -- and the expanded array is appended
+    # to the PKGBUILD, so its last assignment is what makepkg uses. No
+    # PKGBUILD code runs outside makepkg.
+    srcinfo=$(as_builduser_in "$pkgdir" makepkg --printsrcinfo) || die 'makepkg --printsrcinfo failed'
+    SRCINFO=$srcinfo python - "$pkgbuild" "$branch" <<'PY'
+import os
+import re
+import shlex
+import sys
+
+path, branch = sys.argv[1], sys.argv[2]
+ours = re.compile(
+    r"^(?P<name>[^:/]+::)?(?P<url>git\+https://github\.com/(?:biglinux|big-comm)/[^#]+)"
+    r"(?:#(?P<kind>branch|tag|commit)=(?P<ref>.*))?$"
+)
+arrays = {}
+for line in os.environ["SRCINFO"].splitlines():
+    found = re.match(r"^\t(source(?:_\w+)?) = (.*)$", line)
+    if found:
+        arrays.setdefault(found.group(1), []).append(found.group(2))
+
+patched, lines = 0, []
+for name, entries in arrays.items():
+    updated = []
+    for entry in entries:
+        match = ours.match(entry)
+        # A pinned commit is kept on purpose; a branch or tag follows the testing branch.
+        if match and match.group("kind") != "commit" and match.group("ref") != branch:
+            entry = f"{match.group('name') or ''}{match.group('url')}#branch={branch}"
+            patched += 1
+        updated.append(entry)
+    lines.append(f"{name}=(" + " ".join(shlex.quote(entry) for entry in updated) + ")")
+
+if patched:
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("\n# Added by build-package: a testing build uses the dispatched branch.\n")
+        handle.write("\n".join(lines) + "\n")
+    print(f"Patched {patched} expanded BigLinux Git source URL(s) for branch {branch}")
+PY
+
+    # 3. A testing build never compiles another branch in silence.
+    srcinfo=$(as_builduser_in "$pkgdir" makepkg --printsrcinfo) || die 'makepkg --printsrcinfo failed'
+    SRCINFO=$srcinfo python - "$branch" <<'PY'
+import os
+import re
+import sys
+
+branch = sys.argv[1]
+ours = re.compile(r"^\tsource(?:_\w+)? = (?:[^:/]+::)?(git\+https://github\.com/(?:biglinux|big-comm)/.*)$")
+wrong = [
+    match.group(1)
+    for match in map(ours.match, os.environ["SRCINFO"].splitlines())
+    if match and not match.group(1).endswith(f"#branch={branch}") and "#commit=" not in match.group(1)
+]
+if wrong:
+    print(f"ERROR: this testing build of {branch} would compile another branch:", file=sys.stderr)
+    for source in wrong:
+        print(f"  {source}", file=sys.stderr)
+    sys.exit(1)
 PY
 }
 
