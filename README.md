@@ -145,7 +145,7 @@ The shell logic is kept in regular script files instead of being embedded in lar
 | `scripts/build-package.sh` | Configure repositories, update the system, clone the source, run `makepkg`, execute Namcap, and prepare the artifact. |
 | `scripts/publish-package.sh` | Validate package metadata, sign packages, upload through SSH, update the repository database, and optionally create a GitHub release. |
 | `scripts/notify.sh` | Telegram: start (step 1/4) and final result (step 4/4 or failure alert). |
-| `scripts/telegram.sh` | Telegram helpers shared by the scripts; messages use the big-comm format. Steps 2/4 and 3/4 are sent by `publish-package.sh`. |
+| `scripts/telegram.sh` | Telegram helpers shared by the scripts; messages use the big-comm format. One message per build: step 1/4 sends it and every later step (2/4 and 3/4 from `publish-package.sh`, then 4/4 or the failure) edits it, its id passed from job to job; a message that cannot be edited is sent anew. Tested by `tests/test-telegram.sh`. |
 
 Keeping this logic in scripts makes it easier to read, test with ShellCheck, and reuse without turning the workflow YAML into a large shell program.
 

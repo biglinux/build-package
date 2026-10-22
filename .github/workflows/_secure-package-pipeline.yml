@@ -79,6 +79,9 @@ jobs:
     continue-on-error: true
     permissions:
       contents: read
+    # The build's one Telegram message: the later steps edit it.
+    outputs:
+      message_id: ${{ steps.notify.outputs.telegram_message_id }}
     steps:
       - name: Checkout notification script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,6 +90,7 @@ jobs:
           fetch-depth: 1
 
       - name: Notify Telegram
+        id: notify
         env:
           TELEGRAM_TOKEN: ${{ secrets.TOKEN_BOT }}
           TELEGRAM_CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -172,8 +176,11 @@ jobs:
 
   publish:
     name: Sign and publish in a fresh runner
-    needs: build
-    if: ${{ inputs.push_to_repo == 'true' || (inputs.publish_github == 'true' && inputs.branch_type != 'testing' && inputs.branch_type != 'aur') }}
+    # announce only hands over its message id: a failed announcement must not
+    # skip the publication, hence the explicit build check instead of the
+    # implicit success() of every job in needs.
+    needs: [build, announce]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (inputs.push_to_repo == 'true' || (inputs.publish_github == 'true' && inputs.branch_type != 'testing' && inputs.branch_type != 'aur')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: package-production
@@ -189,6 +196,8 @@ jobs:
     outputs:
       branch: ${{ steps.publish.outputs.branch }}
       files: ${{ steps.publish.outputs.files }}
+      # A new id only when the announcement could not be edited.
+      message_id: ${{ steps.publish.outputs.telegram_message_id || needs.announce.outputs.message_id }}
     steps:
       - name: Record publication start
         shell: bash
@@ -252,6 +261,7 @@ jobs:
           GH_TOKEN: ${{ secrets.REPOSITORY_TOKEN || github.token }}
           TELEGRAM_TOKEN: ${{ secrets.TOKEN_BOT }}
           TELEGRAM_CHAT_ID: ${{ secrets.CHAT_ID }}
+          TELEGRAM_MESSAGE_ID: ${{ needs.announce.outputs.message_id }}
           STARTED_AT: ${{ needs.build.outputs.started_at }}
         run: ./scripts/publish-package.sh
 
@@ -270,7 +280,7 @@ jobs:
 
   notify:
     name: Send final notification
-    needs: [build, publish]
+    needs: [build, publish, announce]
     if: always()
     runs-on: ubuntu-latest
     environment: package-notifications
@@ -306,6 +316,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TOKEN_BOT }}
           TELEGRAM_CHAT_ID: ${{ secrets.CHAT_ID }}
+          TELEGRAM_MESSAGE_ID: ${{ needs.publish.outputs.message_id || needs.announce.outputs.message_id }}
           FINAL_STATUS: ${{ steps.status.outputs.value }}
           PACKAGE_NAME: ${{ inputs.package_name }}
           BRANCH_TYPE: ${{ inputs.branch_type }}
