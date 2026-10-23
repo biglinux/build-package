@@ -3,10 +3,10 @@ description: Builds an unsigned Arch/Manjaro package in a secret-free job
 
 inputs:
   build_env:
-    description: "Build environment: stable, testing, extra or aur"
+    description: "Build environment: stable, testing, priority, extra or aur"
     required: true
   branch_type:
-    description: "Destination branch: stable, testing, extra or aur"
+    description: "Destination branch: stable, testing, priority, extra or aur"
     required: true
   package_name:
     description: Package name

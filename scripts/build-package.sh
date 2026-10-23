@@ -98,7 +98,7 @@ configure_repositories() {
 
     strip_repo_sections /etc/pacman.conf \
         community-stable community-testing community-extra \
-        biglinux-stable biglinux-testing biglinux-extra
+        biglinux-priority biglinux-stable biglinux-testing biglinux-extra
 
     # The same line for every section, the way Arch and Manjaro write theirs:
     # pacman turns $repo into the section name (biglinux-stable/x86_64, ...).
@@ -111,6 +111,14 @@ configure_repositories() {
     # stable repositories are only fallbacks where required.
     case "$branch" in
         stable)
+            append_repo community-stable "$community"
+            append_repo biglinux-stable "$biglinux"
+            append_repo biglinux-extra "$biglinux"
+            ;;
+        priority)
+            # biglinux-priority overrides stable on users' machines, so its
+            # packages build against stable with priority itself first.
+            append_repo biglinux-priority "$biglinux"
             append_repo community-stable "$community"
             append_repo biglinux-stable "$biglinux"
             append_repo biglinux-extra "$biglinux"
@@ -442,8 +450,8 @@ main() {
     require_value PACKAGE_NAME "${PACKAGE_NAME:-}"
     require_value SOURCE_URL "${SOURCE_URL:-}"
     [[ $PACKAGE_NAME =~ ^[A-Za-z0-9][A-Za-z0-9@._+-]*$ ]] || die 'Invalid package name'
-    validate_enum "$BUILD_ENV" stable testing extra aur
-    validate_enum "$BRANCH_TYPE" stable testing extra aur
+    validate_enum "$BUILD_ENV" stable testing priority extra aur
+    validate_enum "$BRANCH_TYPE" stable testing priority extra aur
 
     rm -rf "$DIST_DIR"
     configure_repositories "$BRANCH_TYPE" "$MANJARO_BRANCH" "$PACMAN_MIRROR"
