@@ -60,5 +60,17 @@ TELEGRAM_TOKEN='' TELEGRAM_CHAT_ID='' PATH="$work/bin:$PATH" CALLS="$work/calls"
     bash -c 'source "$1"; tg_send "text" >/dev/null' _ "$here/../scripts/telegram.sh"
 check 'without the secrets nothing is called' '' "$(cat "$work/calls")"
 
+helper() {  # helper CODE -> output of CODE with telegram.sh sourced
+    GITHUB_TRIGGERING_ACTOR='a<b' GITHUB_ACTOR=other bash -c 'source "$1"; eval "$2"' _ "$here/../scripts/telegram.sh" "$1"
+}
+# shellcheck disable=SC2016  # expanded by the helper's shell
+check 'sizes read as a person would' '900 B|1.2 MB|3.0 GB' \
+    "$(helper 'printf "%s|%s|%s" "$(tg_size 900)" "$(tg_size 1258291)" "$(tg_size 3221225472)"')"
+# shellcheck disable=SC2016  # expanded by the helper's shell
+check 'each branch has its icon' '🧪✅🧩🚀🐧❔' \
+    "$(helper 'for b in testing Stable extra priority aur other; do tg_branch_icon "$b"; done')"
+check 'the branch line names the source branch' '🧪 <b>Branch:</b> testing (dev-x)' "$(helper 'tg_branch testing dev-x')"
+check 'who triggered the build, escaped' '👤 <b>Built by:</b> <code>a&lt;b</code>' "$(helper "tg_actor 'Built by'")"
+
 ((fail == 0)) && echo && echo 'all passed'
 exit "$fail"

@@ -320,6 +320,7 @@ jobs:
           FINAL_STATUS: ${{ steps.status.outputs.value }}
           PACKAGE_NAME: ${{ inputs.package_name }}
           BRANCH_TYPE: ${{ inputs.branch_type }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
           STARTED_AT: ${{ needs.build.outputs.started_at }}
           PUBLISHED_BRANCH: ${{ needs.publish.outputs.branch }}
           PUBLISHED_FILES: ${{ needs.publish.outputs.files }}

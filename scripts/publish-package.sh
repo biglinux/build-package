@@ -196,12 +196,13 @@ publish_to_repository() {
     local package size branch=${REPO_BRANCH,,}
     for package in "${PACKAGES[@]}"; do
         size=$(stat -c %s "$package")
-        tg_send "✅ <b>[step 2/4] build-package - SENDING 📦 TO REPOSITORY</b>
-$(tg_header)
-<b>Package:</b> $(tg_escape "$branch/$(basename "$package")")
-<b>Size b/Kb/Mb:</b> <code>${size}/$((size / 1024))/$((size / 1024 / 1024))</code>
-<b>Repository:</b> $(tg_escape "$DB_NAME")
-<b>Branch:</b> $(tg_escape "$branch")"
+        tg_send "📤 <b>[step 2/4] SENDING PACKAGE TO REPOSITORY</b>
+$(tg_package "$(basename "$package")")
+$(tg_branch "$branch")
+🗄️ <b>Repository:</b> $(tg_escape "$DB_NAME")
+💾 <b>Size:</b> <code>$(tg_size "$size")</code>
+$(tg_actor)
+$(tg_footer)"
     done
 
     if ! rsync --archive --protect-args --chmod=F644 --rsh="$RSYNC_SSH" \
@@ -210,10 +211,12 @@ $(tg_header)
         "$PACKAGE_DIR"/*.pkg.tar.zst.sha256 \
         "$REPO_USER@$REPO_HOST:$incoming/"; then
         for package in "${PACKAGES[@]}"; do
-            tg_send "❌ <b>[step 2/4] build-package - FAILED TO SEND PACKAGE</b>
-$(tg_header)
-<b>Package:</b> $(tg_escape "$(basename "$package")")
-<b>Branch:</b> $(tg_escape "$branch")"
+            tg_send "🚨 <b>FAILED TO CREATE PACKAGE</b>
+$(tg_package "$(basename "$package")")
+$(tg_branch "$branch")
+❌ <b>Step:</b> sending to repository
+🔗 <b>Details:</b> $(tg_link "$(tg_run_url)" "#${GITHUB_RUN_NUMBER:-?}")
+$(tg_actor)"
         done
         die 'Failed to send the packages to the repository'
     fi
@@ -245,8 +248,11 @@ REMOTE_NO_DB
     validate_boolean "$include_sigs" REPO_INCLUDE_SIGS
 
     log "Updating repository database: $DB_NAME"
-    tg_send "🧹<b>[step 3/4] build-package - STARTING CLEANUP OF OLD PACKAGES</b>
-<b>branch:</b> $(tg_escape "${REPO_BRANCH^^}")"
+    tg_send "🧹 <b>[step 3/4] CLEANING UP OLD PACKAGES</b>
+$(tg_package "$PACKAGE_NAME")
+$(tg_branch "${REPO_BRANCH,,}")
+$(tg_actor)
+$(tg_footer)"
     if ! "${SSH_CMD[@]}" "$REPO_USER@$REPO_HOST" \
         bash -s -- "$incoming" "$TARGET_DIR" "$DB_NAME" "$include_sigs" "$post_publish" <<'REMOTE_PUBLISH'
 set -Eeuo pipefail
@@ -292,14 +298,19 @@ if [[ -n $post_publish ]]; then
 fi
 REMOTE_PUBLISH
     then
-        tg_send "🧹 <b>[step 3.1/4] build-package - CLEANUP COMPLETED</b>
-❌ <b>The package is not published: the repository update failed</b>
-$(tg_header)"
+        tg_send "🚨 <b>FAILED TO CREATE PACKAGE</b>
+$(tg_package "$PACKAGE_NAME")
+$(tg_branch "${REPO_BRANCH,,}")
+❌ <b>Step:</b> updating the repository (the package is not published)
+🔗 <b>Details:</b> $(tg_link "$(tg_run_url)" "#${GITHUB_RUN_NUMBER:-?}")
+$(tg_actor)"
         die 'The repository update failed'
     fi
-    tg_send "🧹 <b>[step 3.1/4] build-package - CLEANUP COMPLETED</b>
-✅ <b>Cleanup completed successfully</b>
-$(tg_header)"
+    tg_send "🧹 <b>[step 3.1/4] CLEANUP COMPLETED</b>
+$(tg_package "$PACKAGE_NAME")
+$(tg_branch "${REPO_BRANCH,,}")
+$(tg_actor)
+$(tg_footer)"
 }
 
 release_repository() {
@@ -348,10 +359,13 @@ publish_github_release() {
     log "Publishing GitHub release $repository@$tag"
     local started=${STARTED_AT:-}
     [[ $started =~ ^[0-9]+$ ]] || started=$(date +%s)
-    tg_send "🕒 <b>[step 3.2/4] build-package - PREPARE PACKAGE FOR RELEASE</b>
-$(tg_header)
-<b>Package:</b> $(tg_escape "${REPO_BRANCH:-$BRANCH_TYPE}/$(basename "${PACKAGES[0]}")")
-<b>Start:</b> <code>$(tg_time "$started")</code>"
+    tg_send "🗜️ <b>[step 3.2/4] PREPARING PACKAGE FOR RELEASE</b>
+$(tg_package "$(basename "${PACKAGES[0]}")")
+$(tg_branch "${REPO_BRANCH:-$BRANCH_TYPE}")
+📅 <b>Date:</b> <code>$(tg_date "$started")</code>
+🕒 <b>Started:</b> <code>$(tg_clock "$started")</code>
+$(tg_actor)
+$(tg_footer)"
     if gh release view "$tag" --repo "$repository" >/dev/null 2>&1; then
         gh release upload "$tag" "$RELEASE_TMPDIR"/* --clobber --repo "$repository"
     else

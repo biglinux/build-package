@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Telegram notifications of the package pipeline, in the big-comm format:
 #   notify.sh start               [step 1/4] starting package creation
-#   notify.sh finish STATUS       [step 4/4] finished, or the failure alert
+#   notify.sh finish STATUS       [step 4/4] package ready, or the failure alert
 # Steps 2/4 and 3/4 are sent by publish-package.sh.
 set -Eeuo pipefail
 
 # shellcheck source=scripts/telegram.sh
 source "$(dirname "${BASH_SOURCE[0]}")/telegram.sh"
 
-package=$(tg_escape "${PACKAGE_NAME:-unknown}")
+package=${PACKAGE_NAME:-unknown}
 
 last_commit_message() {
     local url=${SOURCE_URL:-} ref=${SOURCE_BRANCH:-HEAD} hash tmp
@@ -22,39 +22,45 @@ last_commit_message() {
     rm -rf "$tmp"
 }
 
-# testing (dev-talesam): the type, and the source branch when there is one.
-branch_label() {
-    local label=${BRANCH_TYPE:-unknown}
-    [[ -n ${SOURCE_BRANCH:-} ]] && label+=" (${SOURCE_BRANCH})"
-    printf '%s' "$label"
+start() {
+    local commit now
+    commit=$(last_commit_message || true)
+    now=$(date +%s)
+    tg_send "🏁 <b>[step 1/4] STARTING PACKAGE CREATION</b>
+$(tg_package "$package")
+$(tg_branch "${BRANCH_TYPE:-unknown}" "${SOURCE_BRANCH:-}")
+📝 <b>Commit:</b> <i>$(tg_escape "${commit:-unavailable}")</i>
+🔗 <b>Source:</b> <code>$(tg_escape "${SOURCE_URL:-unknown}")</code>
+$(tg_actor)
+📅 <b>Date:</b> <code>$(tg_date "$now")</code>
+🕒 <b>Time:</b> <code>$(tg_clock "$now")</code>
+$(tg_footer)"
 }
 
-start() {
-    local commit
-    commit=$(last_commit_message || true)
-    tg_send "🏁 <b>[step 1/4] build-package - STARTING PACKAGE CREATION</b>
-$(tg_header)
-<b>Name:</b> ${package}
-<b>Commit:</b> <i>$(tg_escape "${commit:-unavailable}")</i>
-<b>Source:</b> <code>$(tg_escape "${SOURCE_URL:-unknown}")</code>
-<b>Started/Triggered by:</b> <code>$(tg_escape "${GITHUB_ACTOR:-?}/${GITHUB_TRIGGERING_ACTOR:-?}")</code>
-<b>Branch:</b> $(tg_escape "$(branch_label)")"
+# The step a failed build stopped at, from the final status.
+failed_step() {
+    case $1 in
+        build-failure) printf 'building the package' ;;
+        publish-failure) printf 'publishing the package' ;;
+    esac
 }
 
 finish() {
-    local status=$1 run_url
-    run_url="https://github.com/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}"
+    local status=$1
 
     if [[ $status != success && $status != build-success ]]; then
-        tg_send "🚨 <b>FAILED to create package:</b>
-<b>Job:</b> $(tg_link "${run_url}" "#${GITHUB_RUN_NUMBER:-?}")
-<b>Package:</b> ${package}
-<b>Branch:</b> $(tg_escape "$(branch_label)")
-<b>Error URL:</b> <a href='${run_url}'>${run_url}</a>"
+        local step
+        step=$(failed_step "$status")
+        tg_send "🚨 <b>FAILED TO CREATE PACKAGE</b>
+$(tg_package "$package")
+$(tg_branch "${BRANCH_TYPE:-unknown}" "${SOURCE_BRANCH:-}")${step:+
+❌ <b>Step:</b> ${step}}
+🔗 <b>Details:</b> $(tg_link "$(tg_run_url)" "#${GITHUB_RUN_NUMBER:-?}")
+$(tg_actor)"
         return
     fi
 
-    local start end duration hours minutes seconds files branch
+    local start end duration hours minutes seconds branch files end_text
     start=${STARTED_AT:-}
     [[ $start =~ ^[0-9]+$ ]] || start=$(date +%s)
     end=$(date +%s)
@@ -63,14 +69,20 @@ finish() {
     minutes=$(((duration % 3600) / 60))
     seconds=$((duration % 60))
     branch=${PUBLISHED_BRANCH:-${BRANCH_TYPE:-unknown}}
-    files=${PUBLISHED_FILES:-${PACKAGE_NAME:-unknown}}
+    files=${PUBLISHED_FILES:-$package}
+    # A build that crosses midnight ends on another day: say which.
+    end_text=$(tg_clock "$end")
+    [[ $(tg_date "$end") != "$(tg_date "$start")" ]] && end_text="$(tg_date "$end") $end_text"
 
-    tg_send "🏆 <b>[step 4/4] build-package - FINISHED AT 🕒:</b> <code>${hours}h ${minutes}m ${seconds}s</code>
-$(tg_header)
-<b>Package:</b> $(tg_escape "${branch,,}/${files}")
-<b>Start:</b> <code>$(tg_time "$start")</code>
-<b>End:</b> <code>$(tg_time "$end")</code>
-<b>Duration:</b> <code>${hours}h ${minutes}m ${seconds}s</code>"
+    tg_send "🏆 <b>[step 4/4] PACKAGE READY</b>
+$(tg_package "${files//,/, }")
+$(tg_branch "${branch,,}")
+📅 <b>Date:</b> <code>$(tg_date "$start")</code>
+🕒 <b>Start:</b> <code>$(tg_clock "$start")</code>
+🕓 <b>End:</b> <code>${end_text}</code>
+⏱️ <b>Duration:</b> <code>${hours}h ${minutes}m ${seconds}s</code>
+$(tg_footer)
+$(tg_actor 'Built by')"
 }
 
 case ${1:-} in

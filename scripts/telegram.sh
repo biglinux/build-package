@@ -80,12 +80,60 @@ tg_run_url() {
     printf 'https://github.com/%s/actions/runs/%s' "${GITHUB_REPOSITORY:-}" "${GITHUB_RUN_ID:-}"
 }
 
-tg_header() {
-    printf '<b>Job:</b> %s\n<b>Workflow:</b> %s' \
+# Every line of a message starts with its icon. Each step repeats the package,
+# its branch and who triggered the build, since the message shows only the
+# build's current step.
+
+# tg_branch_icon BRANCH -> the icon of the repository branch.
+tg_branch_icon() {
+    case ${1,,} in
+        testing) printf '🧪' ;;
+        stable) printf '✅' ;;
+        extra) printf '🧩' ;;
+        priority) printf '🚀' ;;
+        aur) printf '🐧' ;;
+        *) printf '❔' ;;
+    esac
+}
+
+# tg_package NAME -> the package line.
+tg_package() {
+    printf '📦 <b>Package:</b> %s' "$(tg_escape "$1")"
+}
+
+# tg_branch BRANCH [SOURCE BRANCH] -> "🧪 Branch: testing (dev-talesam)".
+tg_branch() {
+    local label=$1
+    [[ -n ${2:-} ]] && label+=" ($2)"
+    printf '%s <b>Branch:</b> %s' "$(tg_branch_icon "$1")" "$(tg_escape "$label")"
+}
+
+# tg_actor [LABEL] -> the GitHub account that triggered the build.
+tg_actor() {
+    printf '👤 <b>%s:</b> <code>%s</code>' "${1:-Triggered by}" \
+        "$(tg_escape "${GITHUB_TRIGGERING_ACTOR:-${GITHUB_ACTOR:-unknown}}")"
+}
+
+# tg_footer -> the run and the workflow, as links.
+tg_footer() {
+    printf '⚙️ <b>Job:</b> %s\n📄 <b>Workflow:</b> %s' \
         "$(tg_link "$(tg_run_url)" "#${GITHUB_RUN_NUMBER:-?}")" \
         "$(tg_link "https://github.com/${GITHUB_REPOSITORY:-}/blob/main/action.yml" build-package/action.yml)"
 }
 
-tg_time() {
-    date -d "@$1" +'%Y-%m-%d %H:%M:%S'
+# tg_size BYTES -> "1.2 MB".
+tg_size() {
+    awk -v bytes="$1" 'BEGIN {
+        split("B KB MB GB", unit); i = 1
+        while (bytes >= 1024 && i < 4) { bytes /= 1024; i++ }
+        printf(i == 1 ? "%d %s" : "%.1f %s", bytes, unit[i])
+    }'
+}
+
+tg_date() {
+    date -d "@$1" +'%Y-%m-%d'
+}
+
+tg_clock() {
+    date -d "@$1" +'%H:%M:%S'
 }
