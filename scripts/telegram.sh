@@ -6,9 +6,11 @@
 
 tg_escape() {
     local value=$1
-    value=${value//&/&amp;}
-    value=${value//</&lt;}
-    value=${value//>/&gt;}
+    # Quoted replacements: since bash 5.2 an unquoted & in the replacement
+    # stands for the matched text, which turned &lt; into <lt; and broke the HTML.
+    value=${value//&/"&amp;"}
+    value=${value//</"&lt;"}
+    value=${value//>/"&gt;"}
     printf '%s' "$value"
 }
 
@@ -61,9 +63,26 @@ tg_warn() {
         "$(sed -n 's/.*"description":"\([^"]*\)".*/\1/p' <<< "$2" | head -1)" >&2
 }
 
+# tg_link URL TEXT -> a link; both are escaped, the URL also for the attribute.
+tg_link() {
+    local url=$1 text=$2
+    url=$(tg_escape "$url")
+    printf '<a href="%s">%s</a>' "${url//\"/"&quot;"}" "$(tg_escape "$text")"
+}
+
+# tg_user LOGIN -> the GitHub account as a link to its profile.
+tg_user() {
+    tg_link "https://github.com/$1" "$1"
+}
+
+tg_run_url() {
+    printf 'https://github.com/%s/actions/runs/%s' "${GITHUB_REPOSITORY:-}" "${GITHUB_RUN_ID:-}"
+}
+
 tg_header() {
-    printf '<b>Job:</b> <code>#%s</code>\n<b>Workflow:</b> <code>build-package/action.yml</code>' \
-        "${GITHUB_RUN_NUMBER:-?}"
+    printf '<b>Job:</b> %s\n<b>Workflow:</b> %s' \
+        "$(tg_link "$(tg_run_url)" "#${GITHUB_RUN_NUMBER:-?}")" \
+        "$(tg_link "https://github.com/${GITHUB_REPOSITORY:-}/blob/main/action.yml" build-package/action.yml)"
 }
 
 tg_time() {

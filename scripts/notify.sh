@@ -22,16 +22,30 @@ last_commit_message() {
     rm -rf "$tmp"
 }
 
+# owner/repository of the source, linked to it.
+source_link() {
+    local url=${SOURCE_URL:-}
+    [[ $url =~ ^https://github\.com/(.+)$ ]] || { tg_escape "${url:-unknown}"; return; }
+    tg_link "$url" "${BASH_REMATCH[1]%.git}"
+}
+
+# testing (dev-talesam): the type, and the source branch when there is one.
+branch_label() {
+    local label=${BRANCH_TYPE:-unknown}
+    [[ -n ${SOURCE_BRANCH:-} ]] && label+=" (${SOURCE_BRANCH})"
+    printf '%s' "$label"
+}
+
 start() {
     local commit
     commit=$(last_commit_message || true)
     tg_send "🏁 <b>[step 1/4] build-package - STARTING PACKAGE CREATION</b>
 $(tg_header)
-<b>Name:</b> <code>${package}</code>
-<b>Commit:</b> <code>$(tg_escape "${commit:-unavailable}")</code>
-<b>Source:</b> <code>$(tg_escape "${SOURCE_URL:-unknown}")</code>
-<b>Started/Triggered by:</b> <code>$(tg_escape "${GITHUB_ACTOR:-?}/${GITHUB_TRIGGERING_ACTOR:-?}")</code>
-<b>Branch:</b> <code>$(tg_escape "${BRANCH_TYPE:-unknown}")</code>"
+<b>Name:</b> ${package}
+<b>Commit:</b> $(tg_escape "${commit:-unavailable}")
+<b>Source:</b> $(source_link)
+<b>Started/Triggered by:</b> $(tg_user "${GITHUB_ACTOR:-?}")/$(tg_user "${GITHUB_TRIGGERING_ACTOR:-?}")
+<b>Branch:</b> $(tg_escape "$(branch_label)")"
 }
 
 finish() {
@@ -40,9 +54,9 @@ finish() {
 
     if [[ $status != success && $status != build-success ]]; then
         tg_send "🚨 <b>FAILED to create package:</b>
-<b>Job:</b> <code>#${GITHUB_RUN_NUMBER:-?}</code>
-<b>Package:</b> <code>${package}</code>
-<b>Branch:</b> <code>$(tg_escape "${BRANCH_TYPE:-unknown}")</code>
+<b>Job:</b> $(tg_link "${run_url}" "#${GITHUB_RUN_NUMBER:-?}")
+<b>Package:</b> ${package}
+<b>Branch:</b> $(tg_escape "$(branch_label)")
 <b>Error URL:</b> <a href='${run_url}'>${run_url}</a>"
         return
     fi
@@ -60,7 +74,7 @@ finish() {
 
     tg_send "🏆 <b>[step 4/4] build-package - FINISHED AT 🕒:</b> <code>${hours}h ${minutes}m ${seconds}s</code>
 $(tg_header)
-<b>Package:</b> <code>$(tg_escape "${branch,,}/${files}")</code>
+<b>Package:</b> $(tg_escape "${branch,,}/${files}")
 <b>Start:</b> <code>$(tg_time "$start")</code>
 <b>End:</b> <code>$(tg_time "$end")</code>
 <b>Duration:</b> <code>${hours}h ${minutes}m ${seconds}s</code>"

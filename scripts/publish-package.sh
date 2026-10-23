@@ -198,10 +198,10 @@ publish_to_repository() {
         size=$(stat -c %s "$package")
         tg_send "✅ <b>[step 2/4] build-package - SENDING 📦 TO REPOSITORY</b>
 $(tg_header)
-<b>Package:</b> <code>$(tg_escape "$branch/$(basename "$package")")</code>
+<b>Package:</b> $(tg_escape "$branch/$(basename "$package")")
 <b>Size b/Kb/Mb:</b> <code>${size}/$((size / 1024))/$((size / 1024 / 1024))</code>
-<b>Repository:</b> <code>$(tg_escape "$DB_NAME")</code>
-<b>Branch:</b> <code>$(tg_escape "$branch")</code>"
+<b>Repository:</b> $(tg_escape "$DB_NAME")
+<b>Branch:</b> $(tg_escape "$branch")"
     done
 
     if ! rsync --archive --protect-args --chmod=F644 --rsh="$RSYNC_SSH" \
@@ -212,8 +212,8 @@ $(tg_header)
         for package in "${PACKAGES[@]}"; do
             tg_send "❌ <b>[step 2/4] build-package - FAILED TO SEND PACKAGE</b>
 $(tg_header)
-<b>Package:</b> <code>$(tg_escape "$(basename "$package")")</code>
-<b>Branch:</b> <code>$(tg_escape "$branch")</code>"
+<b>Package:</b> $(tg_escape "$(basename "$package")")
+<b>Branch:</b> $(tg_escape "$branch")"
         done
         die 'Failed to send the packages to the repository'
     fi
@@ -246,7 +246,7 @@ REMOTE_NO_DB
 
     log "Updating repository database: $DB_NAME"
     tg_send "🧹<b>[step 3/4] build-package - STARTING CLEANUP OF OLD PACKAGES</b>
-<b>branch:</b> <code>$(tg_escape "${REPO_BRANCH^^}")</code>"
+<b>branch:</b> $(tg_escape "${REPO_BRANCH^^}")"
     if ! "${SSH_CMD[@]}" "$REPO_USER@$REPO_HOST" \
         bash -s -- "$incoming" "$TARGET_DIR" "$DB_NAME" "$include_sigs" "$post_publish" <<'REMOTE_PUBLISH'
 set -Eeuo pipefail
@@ -350,7 +350,7 @@ publish_github_release() {
     [[ $started =~ ^[0-9]+$ ]] || started=$(date +%s)
     tg_send "🕒 <b>[step 3.2/4] build-package - PREPARE PACKAGE FOR RELEASE</b>
 $(tg_header)
-<b>Package:</b> <code>$(tg_escape "${REPO_BRANCH:-$BRANCH_TYPE}/$(basename "${PACKAGES[0]}")")</code>
+<b>Package:</b> $(tg_escape "${REPO_BRANCH:-$BRANCH_TYPE}/$(basename "${PACKAGES[0]}")")
 <b>Start:</b> <code>$(tg_time "$started")</code>"
     if gh release view "$tag" --repo "$repository" >/dev/null 2>&1; then
         gh release upload "$tag" "$RELEASE_TMPDIR"/* --clobber --repo "$repository"
