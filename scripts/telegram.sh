@@ -50,7 +50,8 @@ tg_call() {
     local -a fields=(--data-urlencode "chat_id=${TELEGRAM_CHAT_ID}"
                      --data-urlencode "text=${text}"
                      --data-urlencode 'parse_mode=HTML'
-                     --data-urlencode 'disable_web_page_preview=true')
+                     --data-urlencode 'disable_web_page_preview=true'
+                     --data-urlencode 'link_preview_options={"is_disabled":true}')
     [[ -n $extra ]] && fields+=(--data-urlencode "$extra")
     curl --silent --show-error --max-time 20 \
         --request POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/${method}" \

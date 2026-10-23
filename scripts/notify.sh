@@ -22,13 +22,6 @@ last_commit_message() {
     rm -rf "$tmp"
 }
 
-# owner/repository of the source, linked to it.
-source_link() {
-    local url=${SOURCE_URL:-}
-    [[ $url =~ ^https://github\.com/(.+)$ ]] || { tg_escape "${url:-unknown}"; return; }
-    tg_link "$url" "${BASH_REMATCH[1]%.git}"
-}
-
 # testing (dev-talesam): the type, and the source branch when there is one.
 branch_label() {
     local label=${BRANCH_TYPE:-unknown}
@@ -42,9 +35,9 @@ start() {
     tg_send "🏁 <b>[step 1/4] build-package - STARTING PACKAGE CREATION</b>
 $(tg_header)
 <b>Name:</b> ${package}
-<b>Commit:</b> $(tg_escape "${commit:-unavailable}")
-<b>Source:</b> $(source_link)
-<b>Started/Triggered by:</b> $(tg_user "${GITHUB_ACTOR:-?}")/$(tg_user "${GITHUB_TRIGGERING_ACTOR:-?}")
+<b>Commit:</b> <i>$(tg_escape "${commit:-unavailable}")</i>
+<b>Source:</b> <code>$(tg_escape "${SOURCE_URL:-unknown}")</code>
+<b>Started/Triggered by:</b> <code>$(tg_escape "${GITHUB_ACTOR:-?}/${GITHUB_TRIGGERING_ACTOR:-?}")</code>
 <b>Branch:</b> $(tg_escape "$(branch_label)")"
 }
 
