@@ -381,31 +381,59 @@ install_aur_dependencies() {
         --answerclean None --answerdiff None "${deps[@]}"
 }
 
+pkginfo_value() {  # pkginfo_value PACKAGE_FILE KEY -> the first KEY of its .PKGINFO
+    # awk reads the whole stream: exiting early would kill tar with SIGPIPE.
+    tar -xOf "$1" .PKGINFO 2>/dev/null |
+        awk -F' = ' -v key="$2" \
+            '!found && $1 == key {print substr($0, index($0, " = ") + 3); found = 1}'
+}
+
 validate_packages() {
-    local pkgdir=$1 package
-    local -a packages expected actual
+    local pkgdir=$1 package base name version arch
+    local packages_dir=${PACKAGES_DIR:-/home/builduser/packages}
+    local -a packages declared produced=() versions=()
 
     shopt -s nullglob
-    packages=(/home/builduser/packages/*.pkg.tar.zst)
+    packages=("$packages_dir"/*.pkg.tar.zst)
     ((${#packages[@]} > 0)) || die 'makepkg did not produce a package'
 
-    mapfile -t expected < <(
-        as_builduser_in "$pkgdir" makepkg --packagelist |
-            sed 's#^.*/##' | sort -u
+    # As BigCommunity's build does: check what makepkg produced, by the
+    # metadata inside each package. Evaluating the PKGBUILD again for its
+    # file names (makepkg --packagelist) recomputes a date-stamped
+    # pkgver/pkgrel, and fails whenever the minute changed during the build.
+    # Package names do not depend on the clock.
+    mapfile -t declared < <(
+        as_builduser_in "$pkgdir" makepkg --printsrcinfo |
+            awk -F' = ' '$1 == "pkgname" {print $2}' | sort -u
     )
-    ((${#expected[@]} > 0)) || die 'PKGBUILD declared no package outputs'
+    ((${#declared[@]} > 0)) || die 'PKGBUILD declared no package outputs'
 
     for package in "${packages[@]}"; do
         [[ -f $package && ! -L $package ]] || die "Invalid package output: $package"
-        actual+=("$(basename "$package")")
+        base=$(basename "$package")
+        name=$(pkginfo_value "$package" pkgname)
+        version=$(pkginfo_value "$package" pkgver)
+        arch=$(pkginfo_value "$package" arch)
+        [[ -n $name && -n $version && -n $arch ]] || die "$base has no valid .PKGINFO"
+        [[ $base == "$name-$version-$arch.pkg.tar.zst" ]] ||
+            die "$base does not match its .PKGINFO ($name-$version-$arch)"
+        # makepkg's debug option adds <name>-debug next to a declared package.
+        if [[ $name == *-debug ]] && printf '%s\n' "${declared[@]}" | grep -qxF -- "${name%-debug}"; then
+            :
+        else
+            produced+=("$name")
+        fi
+        versions+=("$version")
         namcap "$package" || true
     done
-    mapfile -t actual < <(printf '%s\n' "${actual[@]}" | sort -u)
+
+    (($(printf '%s\n' "${versions[@]}" | sort -u | wc -l) == 1)) ||
+        die "Split packages have different versions: $(printf '%s\n' "${versions[@]}" | sort -u | tr '\n' ' ')"
 
     if ! diff -u \
-        <(printf '%s\n' "${expected[@]}") \
-        <(printf '%s\n' "${actual[@]}"); then
-        die 'Produced package files differ from makepkg --packagelist'
+        <(printf '%s\n' "${declared[@]}") \
+        <(printf '%s\n' "${produced[@]}" | sort -u); then
+        die 'Produced packages differ from the pkgname list of the PKGBUILD'
     fi
 }
 
@@ -462,9 +490,9 @@ main() {
     # immediately before source preparation and compilation.
     export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(date -u +%s)}
     export BIGLINUX_BUILD_VERSION=${BIGLINUX_BUILD_VERSION:-$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y%m%d.%H%M)}
-    # Date-stamped PKGBUILDs (BigLinux and BigCommunity) read BIG_PKGSTAMP when it
-    # is set and the clock otherwise. Fixing it here keeps every makepkg call --
-    # the build and the --packagelist check minutes later -- on the same version.
+    # Date-stamped PKGBUILDs may read BIG_PKGSTAMP instead of the clock, so
+    # every makepkg call of this build names the same version. Those that read
+    # the clock work too: the packages are checked by their own metadata.
     export BIG_PKGSTAMP=${BIG_PKGSTAMP:-$(date -u -d "@$SOURCE_DATE_EPOCH" +%y.%m.%d-%H%M)}
     export BUILD_STARTED_AT
     BUILD_STARTED_AT=$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)

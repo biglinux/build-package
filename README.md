@@ -392,7 +392,9 @@ Store the complete verified contents in `PKGBUILD_KNOWN_HOSTS`.
 
 - installs declared dependencies;
 - runs `makepkg --cleanbuild --clean --syncdeps --noconfirm --nosign`;
-- verifies the package files declared by `makepkg --packagelist`;
+- checks every produced package against its own `.PKGINFO` (file name,
+  version) and the `pkgname` list of the PKGBUILD — never against a second
+  evaluation of the PKGBUILD, which would recompute a date-stamped version;
 - executes Namcap checks;
 - stores the unsigned packages and build metadata as a GitHub artifact.
 
