@@ -349,8 +349,16 @@ publish_github_release() {
     require_value GH_TOKEN "${GH_TOKEN:-}"
     command -v gh >/dev/null 2>&1 || die 'GitHub CLI is required'
 
-    local repository tag
+    local repository tag owner
     repository=$(release_repository)
+    # A package whose source lives in another organization (a big-comm repo
+    # built for BigLinux) gets no release: this pipeline's token cannot write
+    # there (HTTP 403), and the package is already published by now.
+    owner=${GITHUB_REPOSITORY%%/*}
+    if [[ -z ${RELEASE_REPOSITORY:-} && ${repository%%/*} != "$owner" ]]; then
+        log "No GitHub release: $repository belongs to ${repository%%/*}, not $owner"
+        return 0
+    fi
     # A Git tag cannot contain ':': like big-comm, the tag is pkgver-pkgrel
     # without the epoch (1:26.10.15-1746 -> 26.10.15-1746).
     tag=${PACKAGE_VERSION#*:}
