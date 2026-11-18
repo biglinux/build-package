@@ -38,6 +38,13 @@ inputs:
     description: AUR only - pkgrel to build with (e.g. 4.1), to rebuild the same AUR version so pacman upgrades it
     required: false
     default: ""
+  secureboot_key:
+    description: >-
+      Secure Boot signing key (PEM). The pipeline passes it for builds of
+      biglinux/big-kernel alone, whose PKGBUILDs sign the kernel image and its
+      modules with it; build-package.sh checks the source again
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -56,5 +63,6 @@ runs:
         PKGBUILD_PATH: ${{ inputs.pkgbuild_path }}
         AUR_COMMIT: ${{ inputs.aur_commit }}
         AUR_PKGREL: ${{ inputs.aur_pkgrel }}
+        SECUREBOOT_KEY: ${{ inputs.secureboot_key }}
         DIST_DIR: ${{ github.workspace }}/dist
       run: bash "$GITHUB_ACTION_PATH/scripts/build-package.sh"

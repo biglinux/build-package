@@ -359,6 +359,32 @@ Create a GitHub environment named `package-notifications` with:
 
 Notification credentials are kept separate from package signing and repository credentials.
 
+### Secure Boot key (`biglinux/big-kernel` only)
+
+The kernels and modules of [big-kernel](https://github.com/biglinux/big-kernel)
+are signed while they build, with the key users enroll as a MOK. Store it, in
+PEM, in the **repository secret** `SECUREBOOT_KEY` (not in an environment: the
+build job has none).
+
+| Secret | Purpose |
+|---|---|
+| `SECUREBOOT_KEY` | Secure Boot signing key of big-kernel (`secureboot/sign.sh` there). |
+
+It is the one exception to builds without secrets, and it is kept narrow:
+
+- the pipeline passes it to the build of `https://github.com/biglinux/big-kernel`
+  alone, AUR builds excluded; every other build gets an empty value;
+- `scripts/build-package.sh` checks the source again, takes the key out of its
+  environment before running anything, writes it for `builduser` alone just
+  before `makepkg` (its path in `BIGCOMMUNITY_SB_KEY`) and removes it right
+  after, or when the script exits for any reason;
+- `tests/test-secureboot-key.sh` covers those rules.
+
+Anyone who can push to big-kernel can make a build read the key, so keep its
+write access as tight as this repository's. The key must stay the one already
+enrolled: a new one would stop every machine that enrolled it from booting
+with Secure Boot.
+
 ### SSH host verification
 
 Generate and verify the known-hosts entry from a trusted machine:
