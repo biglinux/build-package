@@ -139,6 +139,16 @@ jobs:
           pkgbuild_path: ${{ inputs.pkgbuild_path }}
           aur_commit: ${{ inputs.aur_commit }}
           aur_pkgrel: ${{ inputs.aur_pkgrel }}
+          # The one secret a build may see: the Secure Boot key, for
+          # biglinux/big-kernel alone, whose PKGBUILDs sign the kernel and
+          # its modules while they build (big-kernel/secureboot/sign.sh).
+          # Every other build gets an empty value. The key must stay the one
+          # users enrolled: a new one would not boot their systems.
+          secureboot_key: >-
+            ${{ inputs.build_env != 'aur'
+            && (inputs.source_url == 'https://github.com/biglinux/big-kernel'
+                || inputs.source_url == 'https://github.com/biglinux/big-kernel.git')
+            && secrets.SECUREBOOT_KEY || '' }}
 
       # Artifacts refuse ':' in file names, and a package with an epoch has
       # one (name-1:2.0-1-any.pkg.tar.zst): the files travel inside a tar.
@@ -170,7 +180,7 @@ jobs:
             echo
             echo "- Duration inside runner: ${duration}s"
             echo "- Artifact digest: ${ARTIFACT_DIGEST:-unavailable}"
-            echo '- User-managed repository/environment secrets passed to build commands: none'
+            echo '- User-managed repository/environment secrets passed to build commands: none, but the Secure Boot key for biglinux/big-kernel'
             echo '- GITHUB_TOKEN: contents read; checkout credentials are not persisted'
           } >> "$GITHUB_STEP_SUMMARY"
 

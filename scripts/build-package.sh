@@ -437,6 +437,45 @@ validate_packages() {
     fi
 }
 
+# The Secure Boot key, for biglinux/big-kernel alone: its PKGBUILDs sign the
+# kernel image and its modules with it while they build
+# (big-kernel/secureboot/sign.sh, which reads the path in BIGCOMMUNITY_SB_KEY).
+# The pipeline only passes the key for that source; it is checked again here,
+# kept out of the environment of everything else this script runs, written
+# for builduser alone just before makepkg and removed right after it.
+SECUREBOOT_KEY_REPOSITORY=https://github.com/biglinux/big-kernel
+SECUREBOOT_KEY_DIR=/home/builduser/secureboot
+SECUREBOOT_KEY_FILE=
+
+is_secureboot_build() {
+    local url=${SOURCE_URL%/}
+    url=${url%.git}
+    [[ $BUILD_ENV != aur && $url == "$SECUREBOOT_KEY_REPOSITORY" ]]
+}
+
+provide_secureboot_key() {
+    local key=$1
+    if [[ -z $key ]]; then
+        is_secureboot_build && log 'Secure Boot: no key in this workflow, nothing is signed'
+        return 0
+    fi
+    is_secureboot_build || die "the Secure Boot key reached a build of $SOURCE_URL"
+    as_root rm -rf "$SECUREBOOT_KEY_DIR"
+    as_root install -d -o builduser -g builduser -m 0700 "$SECUREBOOT_KEY_DIR"
+    # shellcheck disable=SC2016  # $1 is the inner shell's
+    printf '%s\n' "$key" | as_builduser bash -c 'umask 077 && cat > "$1"' _ "$SECUREBOOT_KEY_DIR/key.pem"
+    SECUREBOOT_KEY_FILE=$SECUREBOOT_KEY_DIR/key.pem
+    log "Secure Boot: key provided to the $SECUREBOOT_KEY_REPOSITORY build"
+}
+
+remove_secureboot_key() {
+    [[ -n $SECUREBOOT_KEY_FILE ]] || return 0
+    as_root shred -u "$SECUREBOOT_KEY_FILE" 2>/dev/null || as_root rm -f -- "$SECUREBOOT_KEY_FILE"
+    as_root rm -rf "$SECUREBOOT_KEY_DIR"
+    SECUREBOOT_KEY_FILE=
+    log 'Secure Boot: key removed'
+}
+
 write_metadata() {
     local source_commit=$1 pkgdir=$2
     local metadata_dir="$DIST_DIR/metadata"
@@ -464,6 +503,12 @@ write_metadata() {
 }
 
 main() {
+    # Out of the environment before anything runs: only makepkg of a
+    # biglinux/big-kernel build gets the key, as a file.
+    local secureboot_key=${SECUREBOOT_KEY:-}
+    unset SECUREBOOT_KEY
+    trap remove_secureboot_key EXIT
+
     : "${BUILD_ENV:=testing}"
     : "${BRANCH_TYPE:=$BUILD_ENV}"
     : "${MANJARO_BRANCH:=stable}"
@@ -543,9 +588,15 @@ main() {
         as_root find /home/builduser/packages -mindepth 1 -maxdepth 1 -delete
     fi
 
+    provide_secureboot_key "$secureboot_key"
+    unset secureboot_key
+    local -a secureboot_env=()
+    [[ -z $SECUREBOOT_KEY_FILE ]] || secureboot_env=("BIGCOMMUNITY_SB_KEY=$SECUREBOOT_KEY_FILE")
+
     log "Building $PACKAGE_NAME as unprivileged user"
-    as_builduser_in "$pkgdir" makepkg \
+    as_builduser_in "$pkgdir" env "${secureboot_env[@]}" makepkg \
         --cleanbuild --clean --syncdeps --noconfirm --noprogressbar --nosign
+    remove_secureboot_key
 
     namcap "$pkgdir/PKGBUILD" || true
     validate_packages "$pkgdir"
